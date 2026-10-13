@@ -33,15 +33,31 @@ MASK = 0xFFFFFF
 # x:(r7+slot), the instance block. Init zeroes $00..$2f.
 SLOT = dict(
     base=0x00, head=0x01, clear=0x02,
-    absorb=0x04, fb=0x05, lpc=0x06, hpc=0x07, dk=0x08,
+    lpc=0x06, hpc=0x07, dk=0x08,
     b1L=0x09, b1R=0x0a, b9L=0x0b, b9R=0x0c, prnL=0x0d, prnR=0x0e,
-    mix=0x0f, bal=0x10, wid=0x11, pre=0x12,
+    pre=0x12,
     phL=0x14, phR=0x15, eL=0x16, eR=0x17,
     lpL=0x18, hpL=0x19, lpR=0x1a, hpR=0x1b, outL=0x1c, outR=0x1d, noutL=0x1e,
     lpLlo=0x24, hpLlo=0x25, lpRlo=0x26, hpRlo=0x27,
     earlyL=0x20, earlyR=0x21, lateL=0x22, lateR=0x23,
+    # the knobs' targets; the live values above glide onto them once a block
+    tabsorb=0x30, tfb=0x31, tlpc=0x32, thpc=0x33, tdk=0x34, tmix=0x35, tbal=0x36,
+    twid=0x37, tpreL=0x38, tpreR=0x39, preL=0x3a, preR=0x3b, snap=0x3c,
+    # per-sample ramps: the value the sample loop reads, and its step
+    cabsorb=0x40, cfb=0x41, cmix=0x42, cbal=0x43, cwid=0x44,
+    dabsorb=0x48, dfb=0x49, dmix=0x4a, dbal=0x4b, dwid=0x4c,
 )
-ZERO_WORDS = 0x30
+ZERO_WORDS = 0x50
+# Smoothing, once a block. Gains and coefficients glide 1/16 of the way
+# (5.8 ms) and land exactly; the tap depth and the pre-delays are
+# slew-limited instead, because a jump in a read position is a click:
+GLIDE = ('lpc', 'hpc')
+SLEW = (('dk', 8), ('preL', 1), ('preR', 1))    # per block: 1/32 sample, 1 sample
+# A step once a block is still a step: the audio-path gains and the tank's
+# decay coefficients move a sample at a time, (target - now) / 256 a sample,
+# the step taken again each call: the same 5.8 ms exponential as the glide,
+# drawn in straight 16-sample pieces. They stop within 255 LSB of the target.
+RAMP = ('absorb', 'fb', 'mix', 'bal', 'wid')
 
 
 def h(v):
@@ -117,7 +133,7 @@ def generate():
         ins('move', f'{x("prn" + s)},n5', 'pre-delay read, per block')
         ins('move', 'y:(r5+n5),a')
         ins('move', f'{x("out" + o)},x0', f'the figure-eight: {o} loop output, last sample')
-        ins('move', f'{x("fb")},y1')
+        ins('move', f'{x("cfb")},y1')
         ins('mac', 'x0,y1,a')
         ins('move', f'{x("lp" + s)},b', 'one-pole LP, DAMP')
         if LP48:
@@ -158,7 +174,7 @@ def generate():
         ins('sub', 'x0,a', 'P = B1 - e')
         interp('the moving read')
         ins('move', 'a,x0')
-        ins('move', f'{x("absorb")},y0', 'absorb, held in y0 through the chain')
+        ins('move', f'{x("cabsorb")},y0', 'absorb, held in y0 through the chain')
         ins('mpy', 'y0,x0,b', 's = absorb * d')
         ins('move', 'b,x0')
         ins('move', 'x1,a')
@@ -264,36 +280,24 @@ def generate():
     ins('mpy', 'x0,y1,b')
     ins('move', '#>$7fffff,a')
     ins('sub', 'b,a')
-    ins('move', f'a,{x("absorb")}')
+    ins('move', f'a,{x("tabsorb")}')
     ins('move', f'#>{q(0.49)},y1', 'fb = 0.99 - 0.49u')
     ins('mpy', 'x0,y1,b')
     ins('move', f'#>{q(0.99)},a')
     ins('sub', 'b,a')
-    ins('move', f'a,{x("fb")}')
+    ins('move', f'a,{x("tfb")}')
     knob(1, 'DAMP: lp = 0.95 - 0.80q')
     ins('move', f'#>{q(0.80)},y1')
     ins('mpy', 'x0,y1,b')
     ins('move', f'#>{q(0.95)},a')
     ins('sub', 'b,a')
-    ins('move', f'a,{x("lpc")}')
+    ins('move', f'a,{x("tlpc")}')
     knob(2, 'MIX')
-    ins('move', f'x0,{x("mix")}')
-    knob(3, 'CHORUS: dk = depth*256 = q >> 8, half = q >> 9')
+    ins('move', f'x0,{x("tmix")}')
+    knob(3, 'CHORUS: dk = depth*256 = q >> 8')
     ins('move', 'x0,a')
     ins('asr', '#$8,a,a')
-    ins('move', f'a1,{x("dk")}')
-    ins('move', 'x0,a')
-    ins('asr', '#$9,a,a')
-    ins('move', 'a1,x1')
-    for s in 'LR':
-        ins('move', f'#>{h(k1[s])},a', f'B1{s} = (16384 - start - m) * 256 + half')
-        ins('add', 'x1,a')
-        ins('move', f'a,{x("b1" + s)}')
-    ins('move', f'{x("dk")},x1')
-    for s in 'LR':
-        ins('move', f'#>{h(k9[s])},a', f'B9{s} = (16384 - start - L) * 256 - dk')
-        ins('sub', 'x1,a')
-        ins('move', f'a,{x("b9" + s)}')
+    ins('move', f'a1,{x("tdk")}')
     knob(4, f'PRE: q * {pre_k} samples')
     ins('move', f'#>{pre_k},y1')
     ins('mpy', 'x0,y1,a')
@@ -311,10 +315,10 @@ def generate():
     ins('move', '#>$410410,y1')
     ins('mpy', 'x0,y1,a')
     ins('add', 'x1,a')
-    ins('move', f'a,{x("wid")}')
+    ins('move', f'a,{x("twid")}')
     ins('bra', 'dv_wset')
     emit('dv_wsml:')
-    ins('move', f'x0,{x("wid")}', 'up to 64: k/128')
+    ins('move', f'x0,{x("twid")}', 'up to 64: k/128')
     emit('dv_wset:')
     knob(0xc, 'LOWCUT (slot 6): hp = 0.002 + 0.098q^2')
     ins('move', 'x0,y1')
@@ -324,9 +328,9 @@ def generate():
     ins('mpy', 'x0,y1,a')
     ins('move', f'#>{q(0.002)},x0')
     ins('add', 'x0,a')
-    ins('move', f'a,{x("hpc")}')
+    ins('move', f'a,{x("thpc")}')
     knob(0xd, 'BAL (slot 8): the LATE share')
-    ins('move', f'x0,{x("bal")}')
+    ins('move', f'x0,{x("tbal")}')
     ins('move', 'x:(r6+$e),a', f'OFFSET (slot 10): (k - 64) * {off_k} / 128 samples')
     ins('and', '#>$7f0000,a')
     ins('move', '#>$400000,x0')
@@ -346,17 +350,81 @@ def generate():
     ins('move', f'{x("pre")},b', 'positive: R later')
     ins('add', 'b,a')
     emit('dv_oset:')
-    for acc, s in (('b', 'L'), ('a', 'R')):
-        ins('move', f'{acc},x0', f'pre {s} -> its read offset')
-        ins('move', f'#>{h(-seg["pre" + s])},{acc}')
-        ins('sub', f'x0,{acc}')
-        ins('move', f'{acc},{x("prn" + s)}')
+    ins('move', f'b,{x("tpreL")}')
+    ins('move', f'a,{x("tpreR")}')
+    emit('; ---- smoothing: the first ready call snaps, every later one glides ----')
+    ins('move', f'{x("snap")},a')
+    ins('tst', 'a')
+    ins('bne', 'dv_glide')
+    for name in GLIDE + tuple(n for n, _ in SLEW):
+        ins('move', f'{x("t" + name)},x0')
+        ins('move', f'x0,{x(name)}')
+    for name in RAMP:
+        ins('move', f'{x("t" + name)},x0')
+        ins('move', f'x0,{x("c" + name)}')
+    ins('move', '#>$1,a')
+    ins('move', f'a,{x("snap")}')
+    ins('bra', 'dv_derive')
+    emit('dv_glide:')
+    for name in GLIDE:
+        ins('move', f'{x("t" + name)},x0', f'{name} += (target - {name}) / 16, landing exactly')
+        ins('move', f'{x(name)},b')
+        ins('move', 'x0,a')
+        ins('sub', 'b,a')
+        ins('asr', '#$4,a,a')
+        ins('move', 'a,x1', 'drop a0: the compare below is 56 bits')
+        ins('move', 'x1,a')
+        ins('add', 'b,a')
+        ins('cmp', 'b,a')
+        ins('teq', 'x0,a', 'a step that floors to 0: the target')
+        ins('move', f'a,{x(name)}')
+    for name, step in SLEW:
+        ins('move', f'{x("t" + name)},a', f'{name} moves at most {step} a block')
+        ins('move', f'{x(name)},b')
+        ins('sub', 'b,a')
+        ins('move', f'#>{step},x0')
+        ins('cmp', 'x0,a')
+        ins('tgt', 'x0,a')
+        ins('move', f'#>{h(-step)},x0')
+        ins('cmp', 'x0,a')
+        ins('tlt', 'x0,a')
+        ins('add', 'b,a')
+        ins('move', f'a,{x(name)}')
+    emit('dv_derive:')
+    ins('move', f'{x("dk")},a', 'half = dk / 2')
+    ins('asr', '#$1,a,a')
+    ins('move', 'a1,x1')
+    for s in 'LR':
+        ins('move', f'#>{h(k1[s])},a', f'B1{s} = (16384 - start - m) * 256 + half')
+        ins('add', 'x1,a')
+        ins('move', f'a,{x("b1" + s)}')
+    ins('move', f'{x("dk")},x1')
+    for s in 'LR':
+        ins('move', f'#>{h(k9[s])},a', f'B9{s} = (16384 - start - L) * 256 - dk')
+        ins('sub', 'x1,a')
+        ins('move', f'a,{x("b9" + s)}')
+    for s in 'LR':
+        ins('move', f'{x("pre" + s)},x0', f'pre {s} -> its read offset')
+        ins('move', f'#>{h(-seg["pre" + s])},a')
+        ins('sub', 'x0,a')
+        ins('move', f'a,{x("prn" + s)}')
+    for name in RAMP:
+        ins('move', f'{x("t" + name)},a', f'the {name} ramp: (target - now) / 256 a sample')
+        ins('move', f'{x("c" + name)},x0')
+        ins('sub', 'x0,a')
+        ins('asr', '#$8,a,a')
+        ins('move', f'a,{x("d" + name)}')
     emit('; ---- the sample loop ----')
     ins('move', '#>$1,n0')
     ins('move', '#>$3fff,m4')
     ins('move', '#>$3fff,m5')
     ins('move', f'{x("head")},r5')
     ins('do', 'n7,>dv_end')
+    for name in RAMP:
+        ins('move', f'{x("c" + name)},a', f'{name} ramps')
+        ins('move', f'{x("d" + name)},x0')
+        ins('add', 'x0,a')
+        ins('move', f'a,{x("c" + name)}')
     lfo('L', ref.LFO_STEP[0])
     lfo('R', ref.LFO_STEP[1])
     side('L')
@@ -368,7 +436,7 @@ def generate():
         ins('sub', 'b,a')
         ins('move', 'a,x0')
         if s == 'L':
-            ins('move', f'{x("bal")},y1')
+            ins('move', f'{x("cbal")},y1')
         ins('mpy', 'x0,y1,a')
         ins('add', 'b,a')
         if s == 'L':
@@ -380,7 +448,7 @@ def generate():
     ins('add', 'x0,b')
     ins('asr', '#$1,b,b', 'm = (wl + wr) / 2')
     ins('move', 'a,x0')
-    ins('move', f'{x("wid")},y1')
+    ins('move', f'{x("cwid")},y1')
     ins('mpy', 'x0,y1,a', 'sd = (wl - wr) * width/2')
     ins('move', 'a,x0')
     ins('move', 'b,a')
@@ -390,7 +458,7 @@ def generate():
     ins('asl', f'#${ref.OUT_SHIFT:x},b,b')
     ins('move', 'b,x1', 'limited: the output clip')
     ins('move', 'a,y0')
-    ins('move', f'{x("mix")},y1')
+    ins('move', f'{x("cmix")},y1')
     for s in 'LR':
         ins('move', 'x:(r0),b', f'{s} = dry + mix*(wet - dry)')
         ins('move', 'y0,a' if s == 'L' else 'x1,a')

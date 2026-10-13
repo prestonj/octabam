@@ -20,7 +20,7 @@
 ;   ap6R   13549
 ;   loopR  14251
 ;   end    16114
-; x:(r7+$xx): base $00, head $01, clear $02, absorb $04, fb $05, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, mix $0f, bal $10, wid $11, pre $12, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, lateL $22, lateR $23
+; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, pre $12, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, lateL $22, lateR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tbal $36, twid $37, tpreL $38, tpreR $39, preL $3a, preR $3b, snap $3c, cabsorb $40, cfb $41, cmix $42, cbal $43, cwid $44, dabsorb $48, dfb $49, dmix $4a, dbal $4b, dwid $4c
 ; Moving taps are P = (16384 - start - delay) * 256, positive, 8 fraction bits.
 ; Only the mpy/mac forms AGENTS.md lists as signed: x0,y1 and y0,x0.
 
@@ -28,7 +28,7 @@ init:
         move    #>$ffffff,m4
         move    r7,r4
         clr     a
-        do      #$30,>dv_zero           ; every slot the loop reads
+        do      #$50,>dv_zero           ; every slot the loop reads
         move    a,x:(r4)+
 dv_zero:
         nop     
@@ -71,43 +71,27 @@ dv_ready:
         mpy     x0,y1,b
         move    #>$7fffff,a
         sub     b,a
-        move    a,x:(r7+$04)
+        move    a,x:(r7+$30)
         move    #>$3eb852,y1            ; fb = 0.99 - 0.49u
         mpy     x0,y1,b
         move    #>$7eb852,a
         sub     b,a
-        move    a,x:(r7+$05)
+        move    a,x:(r7+$31)
         move    x:(r6+$1),a             ; DAMP: lp = 0.95 - 0.80q
         bsr     dv_q
         move    #>$666666,y1
         mpy     x0,y1,b
         move    #>$79999a,a
         sub     b,a
-        move    a,x:(r7+$06)
+        move    a,x:(r7+$32)
         move    x:(r6+$2),a             ; MIX
         bsr     dv_q
-        move    x0,x:(r7+$0f)
-        move    x:(r6+$3),a             ; CHORUS: dk = depth*256 = q >> 8, half = q >> 9
+        move    x0,x:(r7+$35)
+        move    x:(r6+$3),a             ; CHORUS: dk = depth*256 = q >> 8
         bsr     dv_q
         move    x0,a
         asr     #$8,a,a
-        move    a1,x:(r7+$08)
-        move    x0,a
-        asr     #$9,a,a
-        move    a1,x1
-        move    #>$290f00,a             ; B1L = (16384 - start - m) * 256 + half
-        add     x1,a
-        move    a,x:(r7+$09)
-        move    #>$141300,a             ; B1R = (16384 - start - m) * 256 + half
-        add     x1,a
-        move    a,x:(r7+$0a)
-        move    x:(r7+$08),x1
-        move    #>$15fc00,a             ; B9L = (16384 - start - L) * 256 - dk
-        sub     x1,a
-        move    a,x:(r7+$0b)
-        move    #>$019000,a             ; B9R = (16384 - start - L) * 256 - dk
-        sub     x1,a
-        move    a,x:(r7+$0c)
+        move    a1,x:(r7+$34)
         move    x:(r6+$4),a             ; PRE: q * 2117 samples
         bsr     dv_q
         move    #>2117,y1
@@ -126,10 +110,10 @@ dv_ready:
         move    #>$410410,y1
         mpy     x0,y1,a
         add     x1,a
-        move    a,x:(r7+$11)
+        move    a,x:(r7+$37)
         bra     dv_wset
 dv_wsml:
-        move    x0,x:(r7+$11)           ; up to 64: k/128
+        move    x0,x:(r7+$37)           ; up to 64: k/128
 dv_wset:
         move    x:(r6+$c),a             ; LOWCUT (slot 6): hp = 0.002 + 0.098q^2
         bsr     dv_q
@@ -140,10 +124,10 @@ dv_wset:
         mpy     x0,y1,a
         move    #>$004189,x0
         add     x0,a
-        move    a,x:(r7+$07)
+        move    a,x:(r7+$33)
         move    x:(r6+$d),a             ; BAL (slot 8): the LATE share
         bsr     dv_q
-        move    x0,x:(r7+$10)
+        move    x0,x:(r7+$36)
         move    x:(r6+$e),a             ; OFFSET (slot 10): (k - 64) * 1344 / 128 samples
         and     #>$7f0000,a
         move    #>$400000,x0
@@ -163,20 +147,167 @@ dv_opos:
         move    x:(r7+$12),b            ; positive: R later
         add     b,a
 dv_oset:
-        move    b,x0                    ; pre L -> its read offset
-        move    #>$000000,b
-        sub     x0,b
-        move    b,x:(r7+$0d)
-        move    a,x0                    ; pre R -> its read offset
+        move    b,x:(r7+$38)
+        move    a,x:(r7+$39)
+; ---- smoothing: the first ready call snaps, every later one glides ----
+        move    x:(r7+$3c),a
+        tst     a
+        bne     dv_glide
+        move    x:(r7+$32),x0
+        move    x0,x:(r7+$06)
+        move    x:(r7+$33),x0
+        move    x0,x:(r7+$07)
+        move    x:(r7+$34),x0
+        move    x0,x:(r7+$08)
+        move    x:(r7+$38),x0
+        move    x0,x:(r7+$3a)
+        move    x:(r7+$39),x0
+        move    x0,x:(r7+$3b)
+        move    x:(r7+$30),x0
+        move    x0,x:(r7+$40)
+        move    x:(r7+$31),x0
+        move    x0,x:(r7+$41)
+        move    x:(r7+$35),x0
+        move    x0,x:(r7+$42)
+        move    x:(r7+$36),x0
+        move    x0,x:(r7+$43)
+        move    x:(r7+$37),x0
+        move    x0,x:(r7+$44)
+        move    #>$1,a
+        move    a,x:(r7+$3c)
+        bra     dv_derive
+dv_glide:
+        move    x:(r7+$32),x0           ; lpc += (target - lpc) / 16, landing exactly
+        move    x:(r7+$06),b
+        move    x0,a
+        sub     b,a
+        asr     #$4,a,a
+        move    a,x1                    ; drop a0: the compare below is 56 bits
+        move    x1,a
+        add     b,a
+        cmp     b,a
+        teq     x0,a                    ; a step that floors to 0: the target
+        move    a,x:(r7+$06)
+        move    x:(r7+$33),x0           ; hpc += (target - hpc) / 16, landing exactly
+        move    x:(r7+$07),b
+        move    x0,a
+        sub     b,a
+        asr     #$4,a,a
+        move    a,x1                    ; drop a0: the compare below is 56 bits
+        move    x1,a
+        add     b,a
+        cmp     b,a
+        teq     x0,a                    ; a step that floors to 0: the target
+        move    a,x:(r7+$07)
+        move    x:(r7+$34),a            ; dk moves at most 8 a block
+        move    x:(r7+$08),b
+        sub     b,a
+        move    #>8,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    #>$fffff8,x0
+        cmp     x0,a
+        tlt     x0,a
+        add     b,a
+        move    a,x:(r7+$08)
+        move    x:(r7+$38),a            ; preL moves at most 1 a block
+        move    x:(r7+$3a),b
+        sub     b,a
+        move    #>1,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    #>$ffffff,x0
+        cmp     x0,a
+        tlt     x0,a
+        add     b,a
+        move    a,x:(r7+$3a)
+        move    x:(r7+$39),a            ; preR moves at most 1 a block
+        move    x:(r7+$3b),b
+        sub     b,a
+        move    #>1,x0
+        cmp     x0,a
+        tgt     x0,a
+        move    #>$ffffff,x0
+        cmp     x0,a
+        tlt     x0,a
+        add     b,a
+        move    a,x:(r7+$3b)
+dv_derive:
+        move    x:(r7+$08),a            ; half = dk / 2
+        asr     #$1,a,a
+        move    a1,x1
+        move    #>$290f00,a             ; B1L = (16384 - start - m) * 256 + half
+        add     x1,a
+        move    a,x:(r7+$09)
+        move    #>$141300,a             ; B1R = (16384 - start - m) * 256 + half
+        add     x1,a
+        move    a,x:(r7+$0a)
+        move    x:(r7+$08),x1
+        move    #>$15fc00,a             ; B9L = (16384 - start - L) * 256 - dk
+        sub     x1,a
+        move    a,x:(r7+$0b)
+        move    #>$019000,a             ; B9R = (16384 - start - L) * 256 - dk
+        sub     x1,a
+        move    a,x:(r7+$0c)
+        move    x:(r7+$3a),x0           ; pre L -> its read offset
+        move    #>$000000,a
+        sub     x0,a
+        move    a,x:(r7+$0d)
+        move    x:(r7+$3b),x0           ; pre R -> its read offset
         move    #>$fff51a,a
         sub     x0,a
         move    a,x:(r7+$0e)
+        move    x:(r7+$30),a            ; the absorb ramp: (target - now) / 256 a sample
+        move    x:(r7+$40),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$48)
+        move    x:(r7+$31),a            ; the fb ramp: (target - now) / 256 a sample
+        move    x:(r7+$41),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$49)
+        move    x:(r7+$35),a            ; the mix ramp: (target - now) / 256 a sample
+        move    x:(r7+$42),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$4a)
+        move    x:(r7+$36),a            ; the bal ramp: (target - now) / 256 a sample
+        move    x:(r7+$43),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$4b)
+        move    x:(r7+$37),a            ; the wid ramp: (target - now) / 256 a sample
+        move    x:(r7+$44),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$4c)
 ; ---- the sample loop ----
         move    #>$1,n0
         move    #>$3fff,m4
         move    #>$3fff,m5
         move    x:(r7+$01),r5
         do      n7,>dv_end
+        move    x:(r7+$40),a            ; absorb ramps
+        move    x:(r7+$48),x0
+        add     x0,a
+        move    a,x:(r7+$40)
+        move    x:(r7+$41),a            ; fb ramps
+        move    x:(r7+$49),x0
+        add     x0,a
+        move    a,x:(r7+$41)
+        move    x:(r7+$42),a            ; mix ramps
+        move    x:(r7+$4a),x0
+        add     x0,a
+        move    a,x:(r7+$42)
+        move    x:(r7+$43),a            ; bal ramps
+        move    x:(r7+$4b),x0
+        add     x0,a
+        move    a,x:(r7+$43)
+        move    x:(r7+$44),a            ; wid ramps
+        move    x:(r7+$4c),x0
+        add     x0,a
+        move    a,x:(r7+$44)
         move    x:(r7+$14),a            ; LFO L: phase += 270, p = |phase|
         move    #>270,x0
         add     x0,a
@@ -205,7 +336,7 @@ dv_oset:
         move    x:(r7+$0d),n5           ; pre-delay read, per block
         move    y:(r5+n5),a
         move    x:(r7+$1d),x0           ; the figure-eight: R loop output, last sample
-        move    x:(r7+$05),y1
+        move    x:(r7+$41),y1
         mac     x0,y1,a
         move    x:(r7+$18),b            ; one-pole LP, DAMP
         move    x:(r7+$24),b0           ; its low word: the state keeps 48 bits
@@ -251,7 +382,7 @@ dv_oset:
         mpy     y0,x0,a
         add     b,a
         move    a,x0
-        move    x:(r7+$04),y0           ; absorb, held in y0 through the chain
+        move    x:(r7+$40),y0           ; absorb, held in y0 through the chain
         mpy     y0,x0,b                 ; s = absorb * d
         move    b,x0
         move    x1,a
@@ -346,7 +477,7 @@ dv_oset:
         move    x:(r7+$0e),n5           ; pre-delay read, per block
         move    y:(r5+n5),a
         move    x:(r7+$1c),x0           ; the figure-eight: L loop output, last sample
-        move    x:(r7+$05),y1
+        move    x:(r7+$41),y1
         mac     x0,y1,a
         move    x:(r7+$1a),b            ; one-pole LP, DAMP
         move    x:(r7+$26),b0           ; its low word: the state keeps 48 bits
@@ -392,7 +523,7 @@ dv_oset:
         mpy     y0,x0,a
         add     b,a
         move    a,x0
-        move    x:(r7+$04),y0           ; absorb, held in y0 through the chain
+        move    x:(r7+$40),y0           ; absorb, held in y0 through the chain
         mpy     y0,x0,b                 ; s = absorb * d
         move    b,x0
         move    x1,a
@@ -484,7 +615,7 @@ dv_oset:
         move    x:(r7+$22),a
         sub     b,a
         move    a,x0
-        move    x:(r7+$10),y1
+        move    x:(r7+$43),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x1
@@ -501,7 +632,7 @@ dv_oset:
         add     x0,b
         asr     #$1,b,b                 ; m = (wl + wr) / 2
         move    a,x0
-        move    x:(r7+$11),y1
+        move    x:(r7+$44),y1
         mpy     x0,y1,a                 ; sd = (wl - wr) * width/2
         move    a,x0
         move    b,a
@@ -511,7 +642,7 @@ dv_oset:
         asl     #$2,b,b
         move    b,x1                    ; limited: the output clip
         move    a,y0
-        move    x:(r7+$0f),y1
+        move    x:(r7+$42),y1
         move    x:(r0),b                ; L = dry + mix*(wet - dry)
         move    y0,a
         sub     b,a

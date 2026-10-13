@@ -61,24 +61,60 @@ same gain staging). `gen_asm.py` writes `deepverb.asm` from it, so the
 ring layout and constants cannot drift from the reference; edit the
 generator, never the `.asm`.
 
+## Smoothing
+
+Knob words land once a call; nothing the audio touches jumps with them.
+
+| what | how | a full 0 → 127 turn |
+|---|---|---|
+| MIX, BAL, WIDTH, and DECAY's absorb and cross-feed | a per-sample ramp toward the target, (target − now)/256 a sample, the step taken again each call: a 5.8 ms exponential in straight 16-sample pieces | ~95% in 17 ms |
+| DAMP, LCUT (loop filter coefficients) | 1/16 of the way each call, landing exactly | ~95% in 17 ms |
+| CHOR (the tap depth) | at most 1/32 of a sample of tap movement a call | 1.5 s, a glide of at most ~4 cents |
+| PRE, OFFST (the pre-delay reads) | at most one sample a call | 0.77 s, the reverb's input sliding like tape |
+
+The first call after the ring is clean snaps every value to its target, so
+nothing glides up from zero at load.
+
+Measured on a steady 440 Hz tone with each knob jumping 0 → 127 → 0 (the
+peak 4th difference of the output, which holds the tone 96 dB down and
+passes a step; LSB, the tone at 2.1M):
+
+| knob | unsmoothed | smoothed |
+|---|---:|---:|
+| MIX | 7,229,264 | 20,356 |
+| BAL | 18,576,546 | 52,998 |
+| WIDTH | 2,125,781 | 9,687 |
+| DECAY | 1,537,688 | 8,828 |
+| CHOR | 884,831 | 4,951 |
+| DAMP | 207,703 | 14,421 |
+| LCUT | 26,656 | 5,888 (the steady tail reads 5,960) |
+| PRE | 66,513 | 35,895 |
+| OFFST | 172,432 | 37,501 |
+
+What is left on MIX and BAL is the bend at the start of a fast fade, as any
+per-sample one-pole has. **PRE and OFFST still slip a whole sample per
+call while they move**; the tank diffuses it, but it is the one control
+that is not clean (Open).
+
 ## Memory and ownership
 
 One 16K Y ring at the instance's allocator buffer (FX2 only; an FX1 slot is
 3,072 words), written at `r5` with `m5 = $3fff`. Segments, in order: the two
 pre-delay lines (63.2 ms each, PRE + OFFSET), then each side's six
 allpasses and loop delay, each with its moving excursion and one word of
-margin: **16,114 of 16,384 words**. State lives in `x:(r7+$00..$2f)`; init
+margin: **16,114 of 16,384 words**. State lives in `x:(r7+$00..$4f)`; init
 zeroes it all and preserves r1/n1/m1. The ring is cleared 128 words a call,
 and the audio passes dry, bit-exact, until it is clean (128 calls, 46 ms).
 
 ## Measured (12 Oct 2026, `dsp_host`)
 
-- **Cost: 22,972 instructions per core per block** with four instances a
-  core: **113% of the per-track budget** (the stock spring's worst case,
-  20,376, over its four tracks). Over 100%: on a core running four DEEP
-  VERBs, the other effects on those tracks pay the 13%. One instance:
-  5,741 a block; the sample loop is 349 instructions. These are executed
-  instructions, not hardware cycles.
+- **Cost: 24,584 instructions per core per block** with four instances a
+  core: **121% of the per-track budget** (the stock spring's worst case,
+  20,376, over its four tracks); **126%** with every knob moving and split
+  calls (25,632). Over 100%: on a core running four DEEP VERBs, the other
+  effects on those tracks pay the 21-26%. The sample loop is 369
+  instructions (349 before the smoothing, which made it 113%). These are
+  executed instructions, not hardware cycles.
 - **Against the reference:** the residual is 73–88 dB under the
   reference's level at five settings (defaults, chorus at both decay
   extremes, every knob off-centre, partial MIX): 24-bit rounding.
@@ -93,8 +129,12 @@ and the audio passes dry, bit-exact, until it is clean (128 calls, 46 ms).
 
 ## Open
 
-- **No smoothing.** The knobs land once a block; moving DECAY, CHOR, PRE or
-  OFFSET by hand will zipper or click (PRE and OFFSET jump the read).
+- **PRE and OFFST slip a sample a call while they move.** An interpolated
+  pre-delay read with a per-sample ramp would make them clean, for about
+  28 instructions a sample (~9% of the budget).
+- **Over budget** (121-126%). Cheaper options are not taken yet: dropping
+  the absorb/feedback ramps (8 a sample; DECAY jumps click again), or
+  parallel moves in the allpasses, in forms stock already runs.
 - **The voicing is a first guess** (gains, LFO rates, filter ranges, the
   DECAY curve); listening will move it.
 - **The near-freeze in fixed point:** a full-scale input at DECAY 127 is
@@ -104,7 +144,7 @@ and the audio passes dry, bit-exact, until it is clean (128 calls, 46 ms).
 ## Gates
 
 ```sh
-make verify-deepverb          # 20 gates: tools/verify/verify_deepverb.py
+make verify-deepverb          # 29 gates: tools/verify/verify_deepverb.py
 make check REMIX=deepverb
 python3 modules/deepverb/gen_asm.py --check
 python3 modules/deepverb/deepverb_ref.py IN.wav OUT.wav DECAY=110 CHORUS=100
