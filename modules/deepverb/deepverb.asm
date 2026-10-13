@@ -4,23 +4,23 @@
 ; One 16K Y ring at the allocator buffer, r5 the write head (m5 = $3fff).
 ; Segments, positions behind the head (write at the start, reads after it):
 ;   preL   0
-;   preR   2790
-;   ap1L   5580
-;   ap2L   5939
-;   ap3L   6737
-;   ap4L   7331
-;   ap5L   7669
-;   ap6L   8169
-;   loopL  8889
-;   ap1R   10886
-;   ap2R   11311
-;   ap3R   12085
-;   ap4R   12727
-;   ap5R   13081
-;   ap6R   13549
-;   loopR  14251
-;   end    16114
-; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, pre $12, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, lateL $22, lateR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tbal $36, twid $37, tpreL $38, tpreR $39, preL $3a, preR $3b, snap $3c, cabsorb $40, cfb $41, cmix $42, cbal $43, cwid $44, dabsorb $48, dfb $49, dmix $4a, dbal $4b, dwid $4c
+;   preR   2701
+;   ap1L   5402
+;   ap2L   5825
+;   ap3L   6623
+;   ap4L   7217
+;   ap5L   7555
+;   ap6L   8055
+;   loopL  8775
+;   ap1R   10900
+;   ap2R   11389
+;   ap3R   12163
+;   ap4R   12805
+;   ap5R   13159
+;   ap6R   13627
+;   loopR  14329
+;   end    16320
+; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, lateL $22, lateR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tdiff $36, twid $37, tpre $38, pre $3a, snap $3c, stepL $3d, stepR $3e, cabsorb $40, cfb $41, cmix $42, cdiff $43, cwid $44, dabsorb $48, dfb $49, dmix $4a, ddiff $4b, dwid $4c
 ; Moving taps are P = (16384 - start - delay) * 256, positive, 8 fraction bits.
 ; Only the mpy/mac forms AGENTS.md lists as signed: x0,y1 and y0,x0.
 
@@ -87,16 +87,16 @@ dv_ready:
         move    x:(r6+$2),a             ; MIX
         bsr     dv_q
         move    x0,x:(r7+$35)
-        move    x:(r6+$3),a             ; CHORUS: dk = depth*256 = q >> 8
+        move    x:(r6+$3),a             ; CHORUS: dk = depth*256 = q >> 7
         bsr     dv_q
         move    x0,a
-        asr     #$8,a,a
+        asr     #$7,a,a
         move    a1,x:(r7+$34)
-        move    x:(r6+$4),a             ; PRE: q * 2117 samples
+        move    x:(r6+$4),a             ; PRE: q * 2700 samples
         bsr     dv_q
-        move    #>2117,y1
+        move    #>2700,y1
         mpy     x0,y1,a
-        move    a1,x:(r7+$12)           ; the integer, floored
+        move    a1,x:(r7+$38)           ; the integer, floored
         move    x:(r6+$5),a             ; WIDTH: w/2 of the side gain
         and     #>$7f0000,a
         move    a1,x0
@@ -125,30 +125,23 @@ dv_wset:
         move    #>$004189,x0
         add     x0,a
         move    a,x:(r7+$33)
-        move    x:(r6+$d),a             ; BAL (slot 8): the LATE share
+        move    x:(r6+$d),a             ; DIFF (slot 8): the LATE share
         bsr     dv_q
         move    x0,x:(r7+$36)
-        move    x:(r6+$e),a             ; OFFSET (slot 10): (k - 64) * 1344 / 128 samples
-        and     #>$7f0000,a
-        move    #>$400000,x0
-        sub     x0,a
-        move    a,x0
-        move    #>1344,y1
+        move    x:(r6+$e),a             ; RATE (slot 10): the LFO steps, (38, 1484) / (50, 1944) (base, span)
+        bsr     dv_q
+        move    #>1484,y1
         mpy     x0,y1,a
-        move    a1,x1                   ; floored; drop a0 before adding
-        move    x1,a
-        tst     a
-        bge     dv_opos
-        move    x:(r7+$12),b            ; negative: L later
-        sub     a,b
-        move    x:(r7+$12),a
-        bra     dv_oset
-dv_opos:
-        move    x:(r7+$12),b            ; positive: R later
-        add     b,a
-dv_oset:
-        move    b,x:(r7+$38)
-        move    a,x:(r7+$39)
+        move    a1,x1                   ; floored; drop a0
+        move    #>38,a
+        add     x1,a
+        move    a,x:(r7+$3d)
+        move    #>1944,y1
+        mpy     x0,y1,a
+        move    a1,x1                   ; floored; drop a0
+        move    #>50,a
+        add     x1,a
+        move    a,x:(r7+$3e)
 ; ---- smoothing: the first ready call snaps, every later one glides ----
         move    x:(r7+$3c),a
         tst     a
@@ -161,8 +154,6 @@ dv_oset:
         move    x0,x:(r7+$08)
         move    x:(r7+$38),x0
         move    x0,x:(r7+$3a)
-        move    x:(r7+$39),x0
-        move    x0,x:(r7+$3b)
         move    x:(r7+$30),x0
         move    x0,x:(r7+$40)
         move    x:(r7+$31),x0
@@ -199,18 +190,18 @@ dv_glide:
         cmp     b,a
         teq     x0,a                    ; a step that floors to 0: the target
         move    a,x:(r7+$07)
-        move    x:(r7+$34),a            ; dk moves at most 8 a block
+        move    x:(r7+$34),a            ; dk moves at most 16 a block
         move    x:(r7+$08),b
         sub     b,a
-        move    #>8,x0
+        move    #>16,x0
         cmp     x0,a
         tgt     x0,a
-        move    #>$fffff8,x0
+        move    #>$fffff0,x0
         cmp     x0,a
         tlt     x0,a
         add     b,a
         move    a,x:(r7+$08)
-        move    x:(r7+$38),a            ; preL moves at most 1 a block
+        move    x:(r7+$38),a            ; pre moves at most 1 a block
         move    x:(r7+$3a),b
         sub     b,a
         move    #>1,x0
@@ -221,40 +212,29 @@ dv_glide:
         tlt     x0,a
         add     b,a
         move    a,x:(r7+$3a)
-        move    x:(r7+$39),a            ; preR moves at most 1 a block
-        move    x:(r7+$3b),b
-        sub     b,a
-        move    #>1,x0
-        cmp     x0,a
-        tgt     x0,a
-        move    #>$ffffff,x0
-        cmp     x0,a
-        tlt     x0,a
-        add     b,a
-        move    a,x:(r7+$3b)
 dv_derive:
         move    x:(r7+$08),a            ; half = dk / 2
         asr     #$1,a,a
         move    a1,x1
-        move    #>$290f00,a             ; B1L = (16384 - start - m) * 256 + half
+        move    #>$29c100,a             ; B1L = (16384 - start - m) * 256 + half
         add     x1,a
         move    a,x:(r7+$09)
-        move    #>$141300,a             ; B1R = (16384 - start - m) * 256 + half
+        move    #>$140500,a             ; B1R = (16384 - start - m) * 256 + half
         add     x1,a
         move    a,x:(r7+$0a)
         move    x:(r7+$08),x1
-        move    #>$15fc00,a             ; B9L = (16384 - start - L) * 256 - dk
+        move    #>$166e00,a             ; B9L = (16384 - start - L) * 256 - dk
         sub     x1,a
         move    a,x:(r7+$0b)
-        move    #>$019000,a             ; B9R = (16384 - start - L) * 256 - dk
+        move    #>$014200,a             ; B9R = (16384 - start - L) * 256 - dk
         sub     x1,a
         move    a,x:(r7+$0c)
-        move    x:(r7+$3a),x0           ; pre L -> its read offset
+        move    x:(r7+$3a),x0           ; pre -> the L read offset
         move    #>$000000,a
         sub     x0,a
         move    a,x:(r7+$0d)
-        move    x:(r7+$3b),x0           ; pre R -> its read offset
-        move    #>$fff51a,a
+        move    x:(r7+$3a),x0           ; pre -> the R read offset
+        move    #>$fff573,a
         sub     x0,a
         move    a,x:(r7+$0e)
         move    x:(r7+$30),a            ; the absorb ramp: (target - now) / 256 a sample
@@ -272,7 +252,7 @@ dv_derive:
         sub     x0,a
         asr     #$8,a,a
         move    a,x:(r7+$4a)
-        move    x:(r7+$36),a            ; the bal ramp: (target - now) / 256 a sample
+        move    x:(r7+$36),a            ; the diff ramp: (target - now) / 256 a sample
         move    x:(r7+$43),x0
         sub     x0,a
         asr     #$8,a,a
@@ -300,7 +280,7 @@ dv_derive:
         move    x:(r7+$4a),x0
         add     x0,a
         move    a,x:(r7+$42)
-        move    x:(r7+$43),a            ; bal ramps
+        move    x:(r7+$43),a            ; diff ramps
         move    x:(r7+$4b),x0
         add     x0,a
         move    a,x:(r7+$43)
@@ -308,8 +288,8 @@ dv_derive:
         move    x:(r7+$4c),x0
         add     x0,a
         move    a,x:(r7+$44)
-        move    x:(r7+$14),a            ; LFO L: phase += 270, p = |phase|
-        move    #>270,x0
+        move    x:(r7+$14),a            ; LFO L: phase += RATE step, p = |phase|
+        move    x:(r7+$3d),x0
         add     x0,a
         move    a1,x:(r7+$14)           ; wraps: a1 is stored raw
         abs     a                       ; unwrapped: past +1 it is still about 1
@@ -317,8 +297,8 @@ dv_derive:
         move    x:(r7+$08),y1
         mpy     x0,y1,a                 ; a1 = p * depth * 256, an integer
         move    a1,x:(r7+$16)
-        move    x:(r7+$15),a            ; LFO R: phase += 354, p = |phase|
-        move    #>354,x0
+        move    x:(r7+$15),a            ; LFO R: phase += RATE step, p = |phase|
+        move    x:(r7+$3e),x0
         add     x0,a
         move    a1,x:(r7+$15)           ; wraps: a1 is stored raw
         abs     a                       ; unwrapped: past +1 it is still about 1
@@ -383,58 +363,58 @@ dv_derive:
         mpy     y0,x0,b       #>$533333,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffea34,n5
+        move    #>$ffeae6,n5
         move    a,y:(r5+n5)
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffe5b0,n5            ; AP2L 797, g=0.62
+        move    #>$ffe622,n5            ; AP2L 797, g=0.62
         move    y:(r5+n5),x0
         mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffe8cd,n5
+        move    #>$ffe93f,n5
         move    b,y:(r5+n5)
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    #>$ffe35e,n5            ; AP3L 593, g=0.62
+        move    a,x:(r7+$20)            ; EARLY tap
+        move    #>$ffe3d0,n5            ; AP3L 593, g=0.62
         move    y:(r5+n5),x0
         mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe5af,n5
+        move    #>$ffe621,n5
         move    a,y:(r5+n5)
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    b,x:(r7+$20)            ; EARLY tap
-        move    #>$ffe20c,n5            ; AP4L 337, g=0.6
+        move    #>$ffe27e,n5            ; AP4L 337, g=0.6
         move    y:(r5+n5),x0
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffe35d,n5
+        move    #>$ffe3cf,n5
         move    b,y:(r5+n5)
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    #>$ffe018,n5            ; AP5L 499, g=0.6
+        move    #>$ffe08a,n5            ; AP5L 499, g=0.6
         move    y:(r5+n5),x0
         mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe20b,n5
+        move    #>$ffe27d,n5
         move    a,y:(r5+n5)
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffdd48,n5            ; AP6L 719, g=0.6
+        move    #>$ffddba,n5            ; AP6L 719, g=0.6
         move    y:(r5+n5),x0
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffe017,n5
+        move    #>$ffe089,n5
         move    b,y:(r5+n5)
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$22)            ; LATE tap
-        move    #>$ffdd47,n5            ; loop delay 1867 + depth - e
+        move    #>$ffddb9,n5            ; loop delay 1867 + depth - e
         move    a,y:(r5+n5)
         move    x:(r7+$0b),a
         move    x:(r7+$16),x0
@@ -455,7 +435,7 @@ dv_derive:
 ; ---- side R ----
         move    x:(r0+n0),a             ; R in
         asr     #$3,a,a                 ; tank headroom
-        move    #>$fff51a,n5
+        move    #>$fff573,n5
         move    a,y:(r5+n5)
         move    x:(r7+$0e),n5           ; pre-delay read, per block
         move    y:(r5+n5),a
@@ -509,58 +489,58 @@ dv_derive:
         mpy     y0,x0,b       #>$533333,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffd57a,n5
+        move    #>$ffd56c,n5
         move    a,y:(r5+n5)
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffd0cc,n5            ; AP2R 773, g=0.62
+        move    #>$ffd07e,n5            ; AP2R 773, g=0.62
         move    y:(r5+n5),x0
         mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffd3d1,n5
+        move    #>$ffd383,n5
         move    b,y:(r5+n5)
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    #>$ffce4a,n5            ; AP3R 641, g=0.62
+        move    a,x:(r7+$21)            ; EARLY tap
+        move    #>$ffcdfc,n5            ; AP3R 641, g=0.62
         move    y:(r5+n5),x0
         mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffd0cb,n5
+        move    #>$ffd07d,n5
         move    a,y:(r5+n5)
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    b,x:(r7+$21)            ; EARLY tap
-        move    #>$ffcce8,n5            ; AP4R 353, g=0.6
+        move    #>$ffcc9a,n5            ; AP4R 353, g=0.6
         move    y:(r5+n5),x0
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffce49,n5
+        move    #>$ffcdfb,n5
         move    b,y:(r5+n5)
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    #>$ffcb14,n5            ; AP5R 467, g=0.6
+        move    #>$ffcac6,n5            ; AP5R 467, g=0.6
         move    y:(r5+n5),x0
         mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffcce7,n5
+        move    #>$ffcc99,n5
         move    a,y:(r5+n5)
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffc856,n5            ; AP6R 701, g=0.6
+        move    #>$ffc808,n5            ; AP6R 701, g=0.6
         move    y:(r5+n5),x0
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffcb13,n5
+        move    #>$ffcac5,n5
         move    b,y:(r5+n5)
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$23)            ; LATE tap
-        move    #>$ffc855,n5            ; loop delay 1733 + depth - e
+        move    #>$ffc807,n5            ; loop delay 1733 + depth - e
         move    a,y:(r5+n5)
         move    x:(r7+$0c),a
         move    x:(r7+$17),x0
@@ -578,8 +558,8 @@ dv_derive:
         mpy     y0,x0,a
         add     b,a
         move    a,x:(r7+$1d)            ; L has read it
-; ---- output: BAL, WIDTH, makeup, MIX ----
-        move    x:(r7+$20),b            ; wl = early + bal*(late - early)
+; ---- output: DIFF, WIDTH, makeup, MIX ----
+        move    x:(r7+$20),b            ; wl = early + diff*(late - early)
         move    x:(r7+$22),a
         sub     b,a
         move    a,x0
@@ -587,7 +567,7 @@ dv_derive:
         mpy     x0,y1,a
         add     b,a
         move    a,x1
-        move    x:(r7+$21),b            ; wr = early + bal*(late - early)
+        move    x:(r7+$21),b            ; wr = early + diff*(late - early)
         move    x:(r7+$23),a
         sub     b,a
         move    a,x0

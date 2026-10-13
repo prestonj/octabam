@@ -8,10 +8,10 @@ sized to fit one 16,384-word FX2 instance buffer.
 
 Each side of the loop, per sample:
 
-    in -> pre-delay (PRE, plus OFFSET on one side) -> + other side's loop-delay output * FB
+    in -> pre-delay (PRE) -> + other side's loop-delay output * FB
        -> one-pole LP (DAMP) -> one-pole HP (LOWCUT, x - LP)
        -> N lossy allpasses (the first modulated, linear interpolation)
-             tap EARLY after allpass N/2, LATE after allpass N
+             tap EARLY after allpass 2, LATE after allpass N (DIFF blends them)
        -> loop delay (modulated, linear interpolation) -> the other side
 
 A lossy allpass scales its delayed sample by ABSORB before the lattice:
@@ -44,18 +44,20 @@ LOOP_L, LOOP_R = 1867, 1733
 AP_G = (0.65, 0.62, 0.62, 0.60, 0.60, 0.60, 0.60, 0.60)
 APS = 6
 
-DEPTH_MAX = 128          # samples, peak-to-peak excursion of a moving tap
-PRE_K = 2117             # PRE at 127: 48.0 ms
-OFF_K = 1344             # OFFSET: (k - 64) * 1344 / 128 = 10.5 samples a step, -672..+661
-PRE_LINE = PRE_K + 672   # longest pre-delay read, 63.2 ms
-LFO_STEP = (270, 354)    # per sample, of a 2^24 phase: 0.710 / 0.931 Hz
+DEPTH_MAX = 256          # samples, peak-to-peak excursion of a moving tap
+PRE_K = 2700             # PRE at 127: 61.2 ms, what the ring has left (layout())
+PRE_LINE = PRE_K         # longest pre-delay read
+EARLY_AP = 2             # DIFF's grainy end: the tap after this allpass
+# RATE: the LFO phase step per sample (of 2^24), q = RATE/127:
+#   left  38 + q*1484  (0.10 .. 4.0 Hz), right 50 + q*1944 (1.31x the left)
+RATE_L, RATE_R = (38, 1484), (50, 1944)
 IN_SHIFT, OUT_SHIFT = 3, 2   # tank input /8, wet output x4: -18 dB headroom
 
 # Knobs, 0..127 as the panel sends them.
-# OFFSET: 64 none, below delays the left side, above the right (+-15 ms).
 # WIDTH: wet mid/side, 0 mono, 64 as the tank makes it, 127 side x1.5
 # (x2 clipped the wet output at full-scale input, 12 Oct 2026).
-DEFAULTS = dict(DECAY=96, DAMP=64, LOWCUT=16, CHORUS=48, BAL=96, MIX=127, PRE=0, OFFSET=64,
+# RATE 20: 0.71 Hz left, 0.93 right (the rates before RATE was a knob).
+DEFAULTS = dict(DECAY=96, DAMP=64, LOWCUT=16, CHORUS=48, DIFF=96, MIX=127, PRE=0, RATE=20,
                 WIDTH=64)
 Q23 = 1 << 23
 
@@ -105,7 +107,7 @@ def laws(k):
     kw = k['WIDTH'] << 16
     wq = kw / Q23 if k['WIDTH'] <= 64 else 0.5 + (kw / Q23 - 0.5) * (0x410410 / Q23)
     pre = (knob_q(k['PRE']) * PRE_K) >> 23
-    off = (((k['OFFSET'] - 64) << 16) * OFF_K) >> 23
+    qr = knob_q(k['RATE'])
     return dict(
         absorb=1.0 - 0.15 * u,           # in every allpass
         fb=0.99 - 0.49 * u,              # cross-feed, at most 0.99
@@ -113,12 +115,13 @@ def laws(k):
         lp=0.95 - 0.80 * q['DAMP'],
         # one-pole HP (x - LP of x): 0.002 (~14 Hz) .. 0.10 (~740 Hz)
         hp=0.002 + 0.098 * q['LOWCUT'] ** 2,
-        dk=qc >> 8,                      # depth * 256, 0..32767
-        half=qc >> 9,                    # depth/2 * 256
-        late=q['BAL'],                   # LATE share; EARLY gets the rest
+        dk=qc >> 7,                      # depth * 256, 0..65535
+        half=qc >> 8,                    # depth/2 * 256
+        late=q['DIFF'],                  # LATE share; EARLY gets the rest
+        step=(RATE_L[0] + ((qr * RATE_L[1]) >> 23), RATE_R[0] + ((qr * RATE_R[1]) >> 23)),
         mix=q['MIX'],
         width=2 * wq,                    # side gain: 0..1 to the centre, 1..1.5 above
-        pre=(pre + max(0, -off), pre + max(0, off)),
+        pre=(pre, pre),
     )
 
 
@@ -143,10 +146,9 @@ def render(left, right, knobs, aps=APS):
     ring = [0.0] * RING
     n = len(left)
     gains = AP_G[:aps]
-    mid = aps // 2
     sides = []
-    for side, ap, loop, step in (('L', AP_L[:aps], LOOP_L, LFO_STEP[0]),
-                                 ('R', AP_R[:aps], LOOP_R, LFO_STEP[1])):
+    for side, ap, loop, step in (('L', AP_L[:aps], LOOP_L, c['step'][0]),
+                                 ('R', AP_R[:aps], LOOP_R, c['step'][1])):
         sides.append(dict(name=side, ap=ap, loop=loop, step=step, phase=0,
                           lp=0.0, hp=0.0, out=0.0, early=0.0, late=0.0))
     out_l, out_r = [0.0] * n, [0.0] * n
@@ -186,7 +188,7 @@ def render(left, right, knobs, aps=APS):
                 w = x - g * sv
                 ring[w0 % RING] = w
                 x = sv + g * w
-                if j == mid - 1:
+                if j == EARLY_AP - 1:
                     S['early'] = x
             S['late'] = x
 

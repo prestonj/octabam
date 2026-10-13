@@ -4,7 +4,7 @@ The development image for DEEP VERB's gates.
 
 ## What is in it
 
-- **DEEP VERB** — a true-stereo figure-eight allpass reverb on FX2 (id 0x1b, a new chooser row; DARK REV stays): six lossy allpasses a side, the loop delays crossing sides, deep chorus, pre-delay with a stereo offset, width. `modules/deepverb/README.md`.
+- **DEEP VERB** — a true-stereo figure-eight allpass reverb on FX2 (id 0x1b, a new chooser row; DARK REV stays): six lossy allpasses a side, the loop delays crossing sides, deep chorus with a rate, diffusion, width. `modules/deepverb/README.md`.
 
 ## Status
 

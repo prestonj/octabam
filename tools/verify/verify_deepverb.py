@@ -24,8 +24,8 @@ the image that was there before is put back.
 7. Smoothing: each knob jumps 0 -> 127 -> 0 under a steady 440 Hz tone; the
    output's 4th difference (the tone is 96 dB down in it, a step is not)
    stays under a bound per knob, 1.5x what was measured on 12 Oct 2026.
-   Unsmoothed, the same test read 27k (LCUT) to 18.6M (BAL); KNOB_JUMP has
-   both columns.
+   Unsmoothed, the same test read 27k (LCUT) to 18.6M (BAL, now DIFF);
+   KNOB_JUMP has both columns.
 """
 import json
 import os
@@ -59,18 +59,21 @@ BUDGET = SPRING_PEAK / 4
 CEILING = 1.18 * SPRING_PEAK
 
 # Knob jump -> (bound, unsmoothed): the 4th-difference peak in LSB, the tone
-# 0.25 of full scale (2.1M LSB). Measured 12 Oct 2026, one instance, MIX 100.
+# 0.25 of full scale (2.1M LSB). Bounds are 1.5x the smoothed voice measured
+# 12 Oct 2026 (one instance, MIX 100); 'unsmoothed' is the first DSP version,
+# before smoothing (BAL then, DIFF now: 18,576,546). RATE needs no smoothing:
+# a new step keeps the LFO phase continuous.
 KNOB_JUMP = {
-    'DECAY': (13_300, 1_537_688), 'DAMP': (21_700, 207_703), 'MIX': (30_600, 7_229_264),
-    'CHOR': (7_500, 884_831), 'PRE': (53_900, 66_513), 'WIDTH': (14_600, 2_125_781),
-    'LCUT': (8_900, 26_656), 'BAL': (79_500, 18_576_546), 'OFFST': (56_300, 172_432),
+    'DECAY': (2_900, 1_537_688), 'DAMP': (8_700, 207_703), 'MIX': (14_400, 7_229_264),
+    'CHOR': (14_800, 884_831), 'PRE': (60_500, 66_513), 'WIDTH': (6_300, 2_125_781),
+    'LCUT': (10_300, 26_656), 'DIFF': (43_200, 18_576_546), 'RATE': (4_300, None),
 }
 SPLITS = [1, 3, 7, 15, 15, 7, 3, 1]
 
 MOD = registry.by_key('DEEPVERB')
 NAMES = [p.name.decode() if p.name else '' for p in MOD.params]
 # reference knob names -> panel slot names
-PANEL = {'CHORUS': 'CHOR', 'LOWCUT': 'LCUT', 'OFFSET': 'OFFST'}
+PANEL = {'CHORUS': 'CHOR', 'LOWCUT': 'LCUT'}
 
 gates = []
 
@@ -155,8 +158,8 @@ def verify(mems):
     left, right = plucks()
     lead = (WARM - CLEAR) * FR          # the LFOs run through the warm-up after the clear
     cases = ({}, dict(CHORUS=127, DECAY=0), dict(CHORUS=127, DECAY=127),
-             dict(PRE=127, OFFSET=0, WIDTH=127, BAL=20, LOWCUT=100, DAMP=110),
-             dict(MIX=60, PRE=90, OFFSET=127, WIDTH=0))
+             dict(PRE=127, RATE=127, WIDTH=127, DIFF=20, LOWCUT=100, DAMP=110),
+             dict(MIX=60, PRE=90, RATE=0, WIDTH=0, DIFF=0))
     for k in cases:
         kk = {**dict(ref.DEFAULTS), 'MIX': 127, **k}
         (dsp,), _ = run(mems, 'ref', [(left, right)], [kk])
@@ -176,26 +179,26 @@ def verify(mems):
          np.array_equal(dsp[0][:CLEAR * FR], src) and np.array_equal(dsp[1][:CLEAR * FR], srcr),
          f'{CLEAR} calls')
 
-    clean, _ = run(mems, 'clean', [(left, right)], [dict(CHORUS=100, PRE=60, OFFSET=20, WIDTH=90,
-                                                         LOWCUT=40, BAL=70, MIX=100)])
-    words = params(dict(CHORUS=100, PRE=60, OFFSET=20, WIDTH=90, LOWCUT=40, BAL=70, MIX=100))
+    clean, _ = run(mems, 'clean', [(left, right)], [dict(CHORUS=100, PRE=60, RATE=50, WIDTH=90,
+                                                         LOWCUT=40, DIFF=70, MIX=100)])
+    words = params(dict(CHORUS=100, PRE=60, RATE=50, WIDTH=90, LOWCUT=40, DIFF=70, MIX=100))
     dirty = [f'0:{off:x}={(words[off] << 16) | 0xfe00:x}' for off in range(6)]
     dirty += [f'0:{off:x}={(words[slot] << 16) | 0x7f00:x}' for off, slot in ((0xc, 6), (0xd, 8), (0xe, 10))]
-    dirt, _ = run(mems, 'dirty', [(left, right)], [dict(CHORUS=100, PRE=60, OFFSET=20, WIDTH=90,
-                                                        LOWCUT=40, BAL=70, MIX=100)],
+    dirt, _ = run(mems, 'dirty', [(left, right)], [dict(CHORUS=100, PRE=60, RATE=50, WIDTH=90,
+                                                        LOWCUT=40, DIFF=70, MIX=100)],
                   extra=['-pword', ','.join(dirty)])
     gate('knob words with bits 8-15 set render as clean ones',
          all(np.array_equal(a, b) for a, b in zip(clean[0], dirt[0])), f'{len(dirty)} words')
     # The control: -pword is honoured (a host that ignored it would pass the
     # gate above with nothing tested).
-    moved, _ = run(mems, 'pword', [(left, right)], [dict(CHORUS=100, PRE=60, OFFSET=20, WIDTH=90,
-                                                         LOWCUT=40, BAL=70, MIX=100)],
+    moved, _ = run(mems, 'pword', [(left, right)], [dict(CHORUS=100, PRE=60, RATE=50, WIDTH=90,
+                                                         LOWCUT=40, DIFF=70, MIX=100)],
                    extra=['-pword', f'0:0={(words[0] + 1) << 16:x}'])
     gate('control: a raw word with another knob value changes the output',
          not np.array_equal(moved[0][0], clean[0][0]), 'DECAY +1 through -pword')
 
     inputs = [(left[k * 997:] + [0.0] * (k * 997), right[k * 991:] + [0.0] * (k * 991)) for k in range(8)]
-    knobs = [dict(DECAY=40 + 10 * k, CHORUS=16 * k, PRE=15 * k, OFFSET=16 * k, MIX=127) for k in range(8)]
+    knobs = [dict(DECAY=40 + 10 * k, CHORUS=16 * k, PRE=15 * k, RATE=16 * k, MIX=127) for k in range(8)]
     together, meter = run(mems, 'eight', inputs, knobs, instances=8,
                           extra=['-split', ','.join(map(str, SPLITS))])
     peak = max(max(row[1], row[2]) for row in meter[WARM:])

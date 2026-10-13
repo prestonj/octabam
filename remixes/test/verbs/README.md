@@ -11,7 +11,7 @@ Both are FX2 only and each instance takes the track's 16K FX2 buffer.
 
 ## Status
 
-Local render only (`make verify-miniverb`, `make verify-deepverb`). Not yet flashed.
+OCTABAM9, the author's unit, 12 Oct 2026, with DEEP VERB's previous voice (BAL, OFFST): both reverbs ran; DEEP VERB preferred (`modules/deepverb/README.md`, On the unit). The current voice (DIFF, RATE) is local only.
 
 ## Build
 
