@@ -48,9 +48,16 @@ DEPTH_MAX = 256          # samples, peak-to-peak excursion of a moving tap
 PRE_K = 2700             # PRE at 127: 61.2 ms, what the ring has left (layout())
 PRE_LINE = PRE_K         # longest pre-delay read
 EARLY_AP = 2             # DIFF's grainy end: the tap after this allpass
-# RATE: the LFO phase step per sample (of 2^24), q = RATE/127:
-#   left  38 + q*1484  (0.10 .. 4.0 Hz), right 50 + q*1944 (1.31x the left)
+# The moving taps wander: each side's offset follows dk * (|A| + |B|) / 2,
+# A and B triangles at a ratio of 1.618 (never in step, so the sum drifts
+# rather than swings), sampled once a block and ramped per sample.
+# RATE: the triangles' phase steps per sample (of 2^24), q = RATE/127:
+#   left  A 38 + q*1484 (0.10 .. 4.0 Hz), B 61 + q*2401 (x1.618)
+#   right A 50 + q*1944 (x1.31 the left),  B 81 + q*3145
 RATE_L, RATE_R = (38, 1484), (50, 1944)
+RATE_LB, RATE_RB = (61, 2401), (81, 3145)
+WANDER = True
+MARGIN = 4               # words past each moving tap's reach (a split call's ramp can overshoot)
 IN_SHIFT, OUT_SHIFT = 3, 2   # tank input /8, wet output x4: -18 dB headroom
 MIX_SHIFT = 3                # the output mix's coefficients are held /8
 
@@ -87,9 +94,9 @@ def layout(aps=APS):
     for side, ap, loop in (('L', AP_L[:aps], LOOP_L), ('R', AP_R[:aps], LOOP_R)):
         for j, m in enumerate(ap):
             seg[f'ap{j + 1}{side}'] = at
-            at += m + (DEPTH_MAX // 2 + 2 if j == 0 else 1)
+            at += m + (DEPTH_MAX // 2 + MARGIN if j == 0 else 1)
         seg[f'loop{side}'] = at
-        at += loop + DEPTH_MAX + 2
+        at += loop + DEPTH_MAX + MARGIN
     seg['end'] = at
     return seg
 
@@ -120,6 +127,7 @@ def laws(k):
         half=qc >> 8,                    # depth/2 * 256
         late=q['DIFF'],                  # LATE share; EARLY gets the rest
         step=(RATE_L[0] + ((qr * RATE_L[1]) >> 23), RATE_R[0] + ((qr * RATE_R[1]) >> 23)),
+        stepb=(RATE_LB[0] + ((qr * RATE_LB[1]) >> 23), RATE_RB[0] + ((qr * RATE_RB[1]) >> 23)),
         # The output is one 2x2 mix: L = A*wl + B*wr + D*dryL, R = A*wr + B*wl + D*dryR,
         # every coefficient held /8. MIX, WIDTH (side gain 2*wq) and the x4 makeup
         # fold into A and B: x4 * mix * ((1 +- side) / 2) / 8.
@@ -128,6 +136,10 @@ def laws(k):
         cD=(1 - q['MIX']) / 8,
         pre=(pre, pre),
     )
+
+
+def _signed(v):
+    return v - (1 << 24) if v & 0x800000 else v
 
 
 def _tap(buf, head, t256):
@@ -152,9 +164,10 @@ def render(left, right, knobs, aps=APS):
     n = len(left)
     gains = AP_G[:aps]
     sides = []
-    for side, ap, loop, step in (('L', AP_L[:aps], LOOP_L, c['step'][0]),
-                                 ('R', AP_R[:aps], LOOP_R, c['step'][1])):
-        sides.append(dict(name=side, ap=ap, loop=loop, step=step, phase=0,
+    for side, ap, loop, step, stepb in (('L', AP_L[:aps], LOOP_L, c['step'][0], c['stepb'][0]),
+                                        ('R', AP_R[:aps], LOOP_R, c['step'][1], c['stepb'][1])):
+        sides.append(dict(name=side, ap=ap, loop=loop, step=step, stepb=stepb, phase=0, phb=0,
+                          e=0, de=0,
                           lp=0.0, hp=0.0, out=0.0, early=0.0, late=0.0))
     out_l, out_r = [0.0] * n, [0.0] * n
     absorb, fb, lp, hp = c['absorb'], c['fb'], c['lp'], c['hp']
@@ -167,11 +180,17 @@ def render(left, right, knobs, aps=APS):
         dry = (left[i], right[i])
         fed = (sides[1]['out'], sides[0]['out'])     # the figure-eight crossing
         for s, S in enumerate(sides):
-            old = S['phase'] - (1 << 24) if S['phase'] & 0x800000 else S['phase']
-            u = old + S['step']                   # unwrapped, as the accumulator holds it
-            S['phase'] = u & 0xFFFFFF
-            p = min(abs(u), Q23 - 1)              # past +1 it saturates: p is still about 1
-            e256 = (p * dk) >> 23
+            if i % BLOCK == 0:
+                # once a block (the a=1 call): both phases on 16 samples, the
+                # target, and the per-sample step that reaches it at the block end
+                ua = _signed(S['phase']) + BLOCK * S['step']      # unwrapped
+                ub = _signed(S['phb']) + BLOCK * S['stepb']
+                S['phase'], S['phb'] = ua & 0xFFFFFF, ub & 0xFFFFFF
+                p = min((abs(ua) + abs(ub)) >> 1, Q23 - 1)
+                target = (p * dk) >> 23
+                S['de'] = (target - S['e']) >> 4   # 16 samples to the next full call, any split
+            S['e'] += S['de']
+            e256 = S['e']
             sn = S['name']
 
             w0 = head - seg['pre' + sn]

@@ -6,21 +6,21 @@
 ;   preL   0
 ;   preR   2701
 ;   ap1L   5402
-;   ap2L   5825
-;   ap3L   6623
-;   ap4L   7217
-;   ap5L   7555
-;   ap6L   8055
-;   loopL  8775
-;   ap1R   10900
-;   ap2R   11389
-;   ap3R   12163
-;   ap4R   12805
-;   ap5R   13159
-;   ap6R   13627
-;   loopR  14329
-;   end    16320
-; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, wL $22, wR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tdiff $36, twid $37, tpre $38, pre $3a, snap $3c, stepL $3d, stepR $3e, cabsorb $40, cfb $41, cdiff $43, cA $44, cB $45, cD $46, dabsorb $48, dfb $49, ddiff $4b, dA $4c, dB $4d, dD $4e, tA $4f, tB $50, tD $51
+;   ap2L   5827
+;   ap3L   6625
+;   ap4L   7219
+;   ap5L   7557
+;   ap6L   8057
+;   loopL  8777
+;   ap1R   10904
+;   ap2R   11395
+;   ap3R   12169
+;   ap4R   12811
+;   ap5R   13165
+;   ap6R   13633
+;   loopR  14335
+;   end    16328
+; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, wL $22, wR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tdiff $36, twid $37, tpre $38, pre $3a, snap $3c, stepL $3d, stepR $3e, cabsorb $40, cfb $41, cdiff $43, cA $44, cB $45, cD $46, dabsorb $48, dfb $49, ddiff $4b, dA $4c, dB $4d, dD $4e, tA $4f, tB $50, tD $51, phbL $52, phbR $53, deL $54, deR $55, stepbL $56, stepbR $57, rdecay $59, rdamp $5a, rmix $5b, rchor $5c, rpre $5d, rwid $5e, rlcut $5f, rdiff $60, rrate $61, abd $62
 ; Moving taps are P = (16384 - start - delay) * 256, positive, 8 fraction bits.
 ; mpy/mac operand pairs: x0,y1 and y0,x0 (AGENTS.md), x1,y0 and y1,x1 (stock runs both).
 
@@ -28,7 +28,7 @@ init:
         move    #>$ffffff,m4
         move    r7,r4
         clr     a
-        do      #$58,>dv_zero           ; every slot the loop reads
+        do      #$63,>dv_zero           ; every slot the loop reads
         move    a,x:(r4)+
 dv_zero:
         nop     
@@ -36,11 +36,26 @@ dv_zero:
         move    x:(r4),a
         move    a,x:(r7+$00)
         move    a,x:(r7+$01)
+        move    #>$ffffff,x0            ; no masked knob word is -1: every law runs once
+        move    x0,x:(r7+$59)
+        move    x0,x:(r7+$5a)
+        move    x0,x:(r7+$5b)
+        move    x0,x:(r7+$5c)
+        move    x0,x:(r7+$5d)
+        move    x0,x:(r7+$5e)
+        move    x0,x:(r7+$5f)
+        move    x0,x:(r7+$60)
+        move    x0,x:(r7+$61)
         move    #>$80,a                 ; 128 calls of 128 words clear the ring
         move    a,x:(r7+$02)
         rts     
 
 proc:
+; a = 0: the first sub-block of a split block (the dispatcher calls again
+; with a != 0 for the rest). It does no per-block work: the ramps, the
+; wander and the slews carry on from the last call.
+        tst     a
+        beq     dv_sub
 ; Dry until the ring is clean: 128 words a call.
         move    x:(r7+$02),a
         tst     a
@@ -58,9 +73,29 @@ proc:
 dv_clear:
         nop     
         rts     
+dv_sub:
+        move    x:(r7+$02),a            ; dry while the ring clears
+        tst     a
+        bne     dv_none
+        move    x:(r7+$3c),a            ; and before the first full call
+        tst     a
+        beq     dv_none
+        bra     dv_loop
+dv_none:
+        rts     
 dv_ready:
+; Each knob: 5 instructions when its word has not changed, its law when it has.
         move    x:(r6+$0),a             ; DECAY: u = (1 - q)^2
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$59),x0
+        cmp     x0,a
+        beq     dv_skip_rdecay
+        move    a1,x:(r7+$59)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    #>$7fffff,a
         sub     x0,a
         move    a,x0
@@ -77,28 +112,75 @@ dv_ready:
         move    #>$7eb852,a
         sub     b,a
         move    a,x:(r7+$31)
+dv_skip_rdecay:
         move    x:(r6+$1),a             ; DAMP: lp = 0.95 - 0.80q
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$5a),x0
+        cmp     x0,a
+        beq     dv_skip_rdamp
+        move    a1,x:(r7+$5a)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    #>$666666,y1
         mpy     x0,y1,b
         move    #>$79999a,a
         sub     b,a
         move    a,x:(r7+$32)
+dv_skip_rdamp:
         move    x:(r6+$2),a             ; MIX
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$5b),x0
+        cmp     x0,a
+        beq     dv_skip_rmix
+        move    a1,x:(r7+$5b)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    x0,x:(r7+$35)
+        move    #>$1,a
+        move    a,x:(r7+$62)
+dv_skip_rmix:
         move    x:(r6+$3),a             ; CHORUS: dk = depth*256 = q >> 7
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$5c),x0
+        cmp     x0,a
+        beq     dv_skip_rchor
+        move    a1,x:(r7+$5c)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    x0,a
         asr     #$7,a,a
         move    a1,x:(r7+$34)
+dv_skip_rchor:
         move    x:(r6+$4),a             ; PRE: q * 2700 samples
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$5d),x0
+        cmp     x0,a
+        beq     dv_skip_rpre
+        move    a1,x:(r7+$5d)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    #>2700,y1
         mpy     x0,y1,a
         move    a1,x:(r7+$38)           ; the integer, floored
+dv_skip_rpre:
         move    x:(r6+$5),a             ; WIDTH: w/2 of the side gain
         and     #>$7f0000,a
+        move    x:(r7+$5e),x0
+        cmp     x0,a
+        beq     dv_skip_rwid
+        move    a1,x:(r7+$5e)
         move    a1,x0
         move    #>$400000,a
         cmp     x0,a
@@ -115,6 +197,14 @@ dv_ready:
 dv_wsml:
         move    x0,x:(r7+$37)           ; up to 64: k/128
 dv_wset:
+        move    #>$1,a
+        move    a,x:(r7+$62)
+dv_skip_rwid:
+        move    x:(r7+$62),a            ; MIX or WIDTH moved:
+        tst     a
+        beq     dv_skip_abd
+        clr     a
+        move    a,x:(r7+$62)
         move    x:(r7+$37),a            ; A, B = mix * (1/4 +- width/4), D = (1 - mix) / 8
         asr     #$1,a,a
         move    a,x1
@@ -133,8 +223,18 @@ dv_wset:
         sub     x0,a
         asr     #$3,a,a
         move    a,x:(r7+$51)
+dv_skip_abd:
         move    x:(r6+$c),a             ; LOWCUT (slot 6): hp = 0.002 + 0.098q^2
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$5f),x0
+        cmp     x0,a
+        beq     dv_skip_rlcut
+        move    a1,x:(r7+$5f)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    x0,y1
         mpy     x0,y1,a
         move    a,x0
@@ -143,23 +243,60 @@ dv_wset:
         move    #>$004189,x0
         add     x0,a
         move    a,x:(r7+$33)
+dv_skip_rlcut:
         move    x:(r6+$d),a             ; DIFF (slot 8): the LATE share
-        bsr     dv_q
+        and     #>$7f0000,a
+        move    x:(r7+$60),x0
+        cmp     x0,a
+        beq     dv_skip_rdiff
+        move    a1,x:(r7+$60)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
         move    x0,x:(r7+$36)
-        move    x:(r6+$e),a             ; RATE (slot 10): the LFO steps, (38, 1484) / (50, 1944) (base, span)
-        bsr     dv_q
-        move    #>1484,y1
+dv_skip_rdiff:
+        move    x:(r6+$e),a             ; RATE (slot 10): the wander phases' steps, x16 (a block at a time)
+        and     #>$7f0000,a
+        move    x:(r7+$61),x0
+        cmp     x0,a
+        beq     dv_skip_rrate
+        move    a1,x:(r7+$61)
+        move    a1,x0
+        move    #>$010204,y1            ; 1/127
+        mpy     x0,y1,a
+        add     x0,a
+        move    a,x0                    ; 127 -> the largest word
+        move    #>1484,y1               ; stepL: 38 + q * 1484
         mpy     x0,y1,a
         move    a1,x1                   ; floored; drop a0
         move    #>38,a
         add     x1,a
+        asl     #$4,a,a
         move    a,x:(r7+$3d)
-        move    #>1944,y1
+        move    #>1944,y1               ; stepR: 50 + q * 1944
         mpy     x0,y1,a
         move    a1,x1                   ; floored; drop a0
         move    #>50,a
         add     x1,a
+        asl     #$4,a,a
         move    a,x:(r7+$3e)
+        move    #>2401,y1               ; stepbL: 61 + q * 2401
+        mpy     x0,y1,a
+        move    a1,x1                   ; floored; drop a0
+        move    #>61,a
+        add     x1,a
+        asl     #$4,a,a
+        move    a,x:(r7+$56)
+        move    #>3145,y1               ; stepbR: 81 + q * 3145
+        mpy     x0,y1,a
+        move    a1,x1                   ; floored; drop a0
+        move    #>81,a
+        add     x1,a
+        asl     #$4,a,a
+        move    a,x:(r7+$57)
+dv_skip_rrate:
 ; ---- smoothing: the first ready call snaps, every later one glides ----
         move    x:(r7+$3c),a
         tst     a
@@ -239,14 +376,14 @@ dv_derive:
         move    #>$29c100,a             ; B1L = (16384 - start - m) * 256 + half
         add     x1,a
         move    a,x:(r7+$09)
-        move    #>$140500,a             ; B1R = (16384 - start - m) * 256 + half
+        move    #>$140100,a             ; B1R = (16384 - start - m) * 256 + half
         add     x1,a
         move    a,x:(r7+$0a)
         move    x:(r7+$08),x1
-        move    #>$166e00,a             ; B9L = (16384 - start - L) * 256 - dk
+        move    #>$166c00,a             ; B9L = (16384 - start - L) * 256 - dk
         sub     x1,a
         move    a,x:(r7+$0b)
-        move    #>$014200,a             ; B9R = (16384 - start - L) * 256 - dk
+        move    #>$013c00,a             ; B9R = (16384 - start - L) * 256 - dk
         sub     x1,a
         move    a,x:(r7+$0c)
         move    x:(r7+$3a),x0           ; pre -> the L read offset
@@ -287,7 +424,54 @@ dv_derive:
         sub     x0,a
         asr     #$8,a,a
         move    a,x:(r7+$4e)
+; ---- the wander: a target 16 samples on, once a full call ----
+; From one a != 0 call to the next is 16 samples whatever the split, so
+; the step is (target - e) / 16: a split block's first call carries the
+; same straight piece on and lands on the target, never past it.
+        move    x:(r7+$14),a            ; L: A and B on 16 samples; p = (|A| + |B|) / 2
+        move    x:(r7+$3d),x0
+        add     x0,a
+        move    a1,x:(r7+$14)           ; wraps: a1 is stored raw
+        abs     a                       ; unwrapped
+        move    x:(r7+$52),b
+        move    x:(r7+$56),x0
+        add     x0,b
+        move    b1,x:(r7+$52)
+        abs     b
+        add     a,b
+        asr     #$1,b,b
+        move    b,x0                    ; p, saturated at the largest word
+        move    x:(r7+$08),y1
+        mpy     x0,y1,a                 ; a1 = the target, p * dk
+        move    a1,x1
+        move    x1,a
+        move    x:(r7+$16),x0
+        sub     x0,a
+        asr     #$4,a,a                 ; (target - e) / 16, floored
+        move    a1,x:(r7+$54)
+        move    x:(r7+$15),a            ; R: A and B on 16 samples; p = (|A| + |B|) / 2
+        move    x:(r7+$3e),x0
+        add     x0,a
+        move    a1,x:(r7+$15)           ; wraps: a1 is stored raw
+        abs     a                       ; unwrapped
+        move    x:(r7+$53),b
+        move    x:(r7+$57),x0
+        add     x0,b
+        move    b1,x:(r7+$53)
+        abs     b
+        add     a,b
+        asr     #$1,b,b
+        move    b,x0                    ; p, saturated at the largest word
+        move    x:(r7+$08),y1
+        mpy     x0,y1,a                 ; a1 = the target, p * dk
+        move    a1,x1
+        move    x1,a
+        move    x:(r7+$17),x0
+        sub     x0,a
+        asr     #$4,a,a                 ; (target - e) / 16, floored
+        move    a1,x:(r7+$55)
 ; ---- the sample loop ----
+dv_loop:
         move    #>$1,n0
         move    #>$3fff,m4
         move    #>$3fff,m5
@@ -317,24 +501,14 @@ dv_derive:
         move    x:(r7+$4e),x0
         add     x0,a
         move    a,x:(r7+$46)
-        move    x:(r7+$14),a            ; LFO L: phase += RATE step, p = |phase|
-        move    x:(r7+$3d),x0
+        move    x:(r7+$16),a            ; eL += deL: the wander, a straight piece a call
+        move    x:(r7+$54),x0
         add     x0,a
-        move    a1,x:(r7+$14)           ; wraps: a1 is stored raw
-        abs     a                       ; unwrapped: past +1 it is still about 1
-        move    a,x0                    ; and saturates to the largest word
-        move    x:(r7+$08),y1
-        mpy     x0,y1,a                 ; a1 = p * depth * 256, an integer
-        move    a1,x:(r7+$16)
-        move    x:(r7+$15),a            ; LFO R: phase += RATE step, p = |phase|
-        move    x:(r7+$3e),x0
+        move    a,x:(r7+$16)
+        move    x:(r7+$17),a            ; eR += deR: the wander, a straight piece a call
+        move    x:(r7+$55),x0
         add     x0,a
-        move    a1,x:(r7+$15)           ; wraps: a1 is stored raw
-        abs     a                       ; unwrapped: past +1 it is still about 1
-        move    a,x0                    ; and saturates to the largest word
-        move    x:(r7+$08),y1
-        mpy     x0,y1,a                 ; a1 = p * depth * 256, an integer
-        move    a1,x:(r7+$17)
+        move    a,x:(r7+$17)
 ; ---- side L ----
         move    #>$000000,n5
         move    x:(r0),a                ; L in
@@ -346,14 +520,12 @@ dv_derive:
         move    y:(r5+n5),a
         mac     x0,y1,a
         move    x:(r7+$18),b            ; one-pole LP, DAMP
-        move    x:(r7+$24),b0           ; its low word: the state keeps 48 bits
         sub     b,a
         move    a,x0
         move    x:(r7+$06),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x:(r7+$18)
-        move    a0,x:(r7+$24)
         move    a,x1                    ; one-pole HP, LOWCUT: x - LP(x)
         move    x:(r7+$19),b
         move    x:(r7+$25),b0           ; its low word: the state keeps 48 bits
@@ -390,53 +562,53 @@ dv_derive:
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
         move    a,y:(r5+n5)
-        move    #>$ffe622,n5
+        move    #>$ffe620,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP2L 797, g=0.62
-        move    #>$ffe93f,n5
+        move    #>$ffe93d,n5
         mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
         move    b,y:(r5+n5)
-        move    #>$ffe3d0,n5
+        move    #>$ffe3ce,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$20)            ; EARLY tap
         move    y:(r5+n5),x0            ; AP3L 593, g=0.62
-        move    #>$ffe621,n5
+        move    #>$ffe61f,n5
         mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
         move    a,y:(r5+n5)
-        move    #>$ffe27e,n5
+        move    #>$ffe27c,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP4L 337, g=0.6
-        move    #>$ffe3cf,n5
+        move    #>$ffe3cd,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
         move    b,y:(r5+n5)
-        move    #>$ffe08a,n5
+        move    #>$ffe088,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP5L 499, g=0.6
-        move    #>$ffe27d,n5
+        move    #>$ffe27b,n5
         mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
         move    a,y:(r5+n5)
-        move    #>$ffddba,n5
+        move    #>$ffddb8,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP6L 719, g=0.6
-        move    #>$ffe089,n5
+        move    #>$ffe087,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
         move    b,y:(r5+n5)
-        move    #>$ffddb9,n5
+        move    #>$ffddb7,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,y:(r5+n5)             ; LATE into the loop delay 1867 + depth - e
@@ -474,14 +646,12 @@ dv_derive:
         move    y:(r5+n5),a
         mac     x0,y1,a
         move    x:(r7+$1a),b            ; one-pole LP, DAMP
-        move    x:(r7+$26),b0           ; its low word: the state keeps 48 bits
         sub     b,a
         move    a,x0
         move    x:(r7+$06),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x:(r7+$1a)
-        move    a0,x:(r7+$26)
         move    a,x1                    ; one-pole HP, LOWCUT: x - LP(x)
         move    x:(r7+$1b),b
         move    x:(r7+$27),b0           ; its low word: the state keeps 48 bits
@@ -504,7 +674,7 @@ dv_derive:
         lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
         move    b1,y0                   ; f, the fraction toward the newer word
-        move    #>$ffd56c,n5            ; AP1 write, ahead
+        move    #>$ffd568,n5            ; AP1 write, ahead
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
@@ -518,53 +688,53 @@ dv_derive:
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
         move    a,y:(r5+n5)
-        move    #>$ffd07e,n5
+        move    #>$ffd078,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP2R 773, g=0.62
-        move    #>$ffd383,n5
+        move    #>$ffd37d,n5
         mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
         move    b,y:(r5+n5)
-        move    #>$ffcdfc,n5
+        move    #>$ffcdf6,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$21)            ; EARLY tap
         move    y:(r5+n5),x0            ; AP3R 641, g=0.62
-        move    #>$ffd07d,n5
+        move    #>$ffd077,n5
         mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
         move    a,y:(r5+n5)
-        move    #>$ffcc9a,n5
+        move    #>$ffcc94,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP4R 353, g=0.6
-        move    #>$ffcdfb,n5
+        move    #>$ffcdf5,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
         move    b,y:(r5+n5)
-        move    #>$ffcac6,n5
+        move    #>$ffcac0,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP5R 467, g=0.6
-        move    #>$ffcc99,n5
+        move    #>$ffcc93,n5
         mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
         move    a,y:(r5+n5)
-        move    #>$ffc808,n5
+        move    #>$ffc802,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
         move    y:(r5+n5),x0            ; AP6R 701, g=0.6
-        move    #>$ffcac5,n5
+        move    #>$ffcabf,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
         move    b,y:(r5+n5)
-        move    #>$ffc807,n5
+        move    #>$ffc801,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,y:(r5+n5)             ; LATE into the loop delay 1733 + depth - e
@@ -617,16 +787,5 @@ dv_end:
         move    r5,x:(r7+$01)
         move    #>$ffffff,m4
         move    #>$ffffff,m5
-        rts     
-
-; k/127 of a knob word in a: x0 = w + w/127, saturated. Clobbers a, y1.
-; After proc: dsp_asm cannot encode a backward bsr.
-dv_q:
-        and     #>$7f0000,a             ; an LFO leaves bits 8-15 set
-        move    a1,x0
-        move    #>$010204,y1            ; 1/127
-        mpy     x0,y1,a
-        add     x0,a
-        move    a,x0                    ; 127 -> the largest word
         rts     
 

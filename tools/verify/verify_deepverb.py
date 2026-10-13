@@ -52,21 +52,23 @@ FR = 16
 CLEAR = 128                 # calls before the ring is clean: dry until then
 WARM = CLEAR + 32           # blocks of silence before the test audio
 SPRING_PEAK = 20376         # stock spring, worst tested, per core per block
-# The per-track budget: spring's peak over its four tracks. The ceiling is a
-# regression guard, not a target: DEEP VERB measured 111% of the budget
-# unsplit and 116% with moving knobs and split calls (12 Oct 2026).
+# The per-track budget: spring's peak over its four tracks. DEEP VERB measured
+# 99.3% of it here (split calls, knobs still), 99.7% with one knob moving
+# every block and 102.2% with all nine moving (12 Oct 2026). The ceiling is a
+# regression guard just above the measurement.
 BUDGET = SPRING_PEAK / 4
-CEILING = 1.18 * SPRING_PEAK
+CEILING = 1.01 * SPRING_PEAK
 
 # Knob jump -> (bound, unsmoothed): the 4th-difference peak in LSB, the tone
-# 0.25 of full scale (2.1M LSB). Bounds are 1.5x the smoothed voice measured
-# 12 Oct 2026 (one instance, MIX 100); 'unsmoothed' is the first DSP version,
+# 0.25 of full scale (2.1M LSB). Bounds are 1.5x the wander voice measured
+# 12 Oct 2026 (one instance, MIX 100; a fade's bend reads higher the less
+# alike the two signals it blends are, so a new voice re-measures them); 'unsmoothed' is the first DSP version,
 # before smoothing (BAL then, DIFF now: 18,576,546). RATE needs no smoothing:
 # a new step keeps the LFO phase continuous.
 KNOB_JUMP = {
-    'DECAY': (2_900, 1_537_688), 'DAMP': (8_700, 207_703), 'MIX': (14_400, 7_229_264),
-    'CHOR': (14_800, 884_831), 'PRE': (60_500, 66_513), 'WIDTH': (6_300, 2_125_781),
-    'LCUT': (10_300, 26_656), 'DIFF': (43_200, 18_576_546), 'RATE': (4_300, None),
+    'DECAY': (2_800, 1_537_688), 'DAMP': (8_350, 207_703), 'MIX': (20_100, 7_229_264),
+    'CHOR': (9_100, 884_831), 'PRE': (56_000, 66_513), 'WIDTH': (10_450, 2_125_781),
+    'LCUT': (3_600, 26_656), 'DIFF': (26_350, 18_576_546), 'RATE': (1_750, None),
 }
 SPLITS = [1, 3, 7, 15, 15, 7, 3, 1]
 

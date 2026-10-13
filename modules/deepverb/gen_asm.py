@@ -26,7 +26,9 @@ ASM = HERE / 'deepverb.asm'
 # The HP coefficient is as small as 0.002, so a truncated 24-bit state
 # sticks, and the loop circulates what it holds.
 RND = False
-LP48 = True
+# LP48 is off (12 Oct 2026): without it the residue is the same (40 LSB at
+# DECAY 64); it is the HP's small coefficient that sticks. 4 a sample.
+LP48 = False
 HP48 = True
 # The rnd around each 48-bit state update: off (12 Oct 2026). With it the
 # DECAY 64 residue was 24 LSB, without it 48 (-105 dBFS), for 8 a sample.
@@ -49,8 +51,15 @@ SLOT = dict(
     cabsorb=0x40, cfb=0x41, cdiff=0x43, cA=0x44, cB=0x45, cD=0x46,
     dabsorb=0x48, dfb=0x49, ddiff=0x4b, dA=0x4c, dB=0x4d, dD=0x4e,
     tA=0x4f, tB=0x50, tD=0x51,
+    # the wander: a second phase a side, the per-sample step of e, B's step
+    phbL=0x52, phbR=0x53, deL=0x54, deR=0x55, stepbL=0x56, stepbR=0x57,
+    # each knob's last masked word: its law runs only when the word changes.
+    # Init sets them to -1, which no masked word equals. abd: MIX or WIDTH moved.
+    rdecay=0x59, rdamp=0x5a, rmix=0x5b, rchor=0x5c, rpre=0x5d, rwid=0x5e,
+    rlcut=0x5f, rdiff=0x60, rrate=0x61, abd=0x62,
 )
-ZERO_WORDS = 0x58
+ZERO_WORDS = 0x63
+RAW = ('rdecay', 'rdamp', 'rmix', 'rchor', 'rpre', 'rwid', 'rlcut', 'rdiff', 'rrate')
 # Smoothing, once a block. Gains and coefficients glide 1/16 of the way
 # (5.8 ms) and land exactly; the tap depth and the pre-delays are
 # slew-limited instead, because a jump in a read position is a click:
@@ -231,9 +240,25 @@ def generate():
         ins('mpy', 'x0,y1,a', 'a1 = p * depth * 256, an integer')
         ins('move', f'a1,{x("e" + s)}')
 
-    def knob(slot, note):
+    def knob(slot, raw, note, scale=True):
+        """Skip to dv_skip_<raw> unless the masked knob word changed. Else
+        x0 = k/127 of it (w + w/127, saturated), or the masked word itself
+        (scale=False). An LFO leaves bits 8-15 set: mask first. Clobbers a, y1."""
         ins('move', f'x:(r6+${slot:x}),a', note)
-        ins('bsr', 'dv_q')
+        ins('and', '#>$7f0000,a')
+        ins('move', f'{x(raw)},x0')
+        ins('cmp', 'x0,a')
+        ins('beq', f'dv_skip_{raw}')
+        ins('move', f'a1,{x(raw)}')
+        ins('move', 'a1,x0')
+        if scale:
+            ins('move', '#>$010204,y1', '1/127')
+            ins('mpy', 'x0,y1,a')
+            ins('add', 'x0,a')
+            ins('move', 'a,x0', '127 -> the largest word')
+
+    def skip(raw):
+        emit(f'dv_skip_{raw}:')
 
     pre_k = ref.PRE_K
     k1 = {s: (ref.RING - seg['ap1' + s] - (ref.AP_L if s == 'L' else ref.AP_R)[0]) * 256 for s in 'LR'}
@@ -262,11 +287,19 @@ def generate():
     ins('move', 'x:(r4),a')
     ins('move', f'a,{x("base")}')
     ins('move', f'a,{x("head")}')
+    ins('move', '#>$ffffff,x0', 'no masked knob word is -1: every law runs once')
+    for raw in RAW:
+        ins('move', f'x0,{x(raw)}')
     ins('move', '#>$80,a', '128 calls of 128 words clear the ring')
     ins('move', f'a,{x("clear")}')
     ins('rts')
     emit('')
     emit('proc:')
+    emit('; a = 0: the first sub-block of a split block (the dispatcher calls again')
+    emit('; with a != 0 for the rest). It does no per-block work: the ramps, the')
+    emit('; wander and the slews carry on from the last call.')
+    ins('tst', 'a')
+    ins('beq', 'dv_sub')
     emit('; Dry until the ring is clean: 128 words a call.')
     ins('move', f'{x("clear")},a')
     ins('tst', 'a')
@@ -284,8 +317,19 @@ def generate():
     emit('dv_clear:')
     ins('nop')
     ins('rts')
+    emit('dv_sub:')
+    ins('move', f'{x("clear")},a', 'dry while the ring clears')
+    ins('tst', 'a')
+    ins('bne', 'dv_none')
+    ins('move', f'{x("snap")},a', 'and before the first full call')
+    ins('tst', 'a')
+    ins('beq', 'dv_none')
+    ins('bra', 'dv_loop')
+    emit('dv_none:')
+    ins('rts')
     emit('dv_ready:')
-    knob(0, 'DECAY: u = (1 - q)^2')
+    emit('; Each knob: 5 instructions when its word has not changed, its law when it has.')
+    knob(0, 'rdecay', 'DECAY: u = (1 - q)^2')
     ins('move', '#>$7fffff,a')
     ins('sub', 'x0,a')
     ins('move', 'a,x0')
@@ -302,25 +346,30 @@ def generate():
     ins('move', f'#>{q(0.99)},a')
     ins('sub', 'b,a')
     ins('move', f'a,{x("tfb")}')
-    knob(1, 'DAMP: lp = 0.95 - 0.80q')
+    skip('rdecay')
+    knob(1, 'rdamp', 'DAMP: lp = 0.95 - 0.80q')
     ins('move', f'#>{q(0.80)},y1')
     ins('mpy', 'x0,y1,b')
     ins('move', f'#>{q(0.95)},a')
     ins('sub', 'b,a')
     ins('move', f'a,{x("tlpc")}')
-    knob(2, 'MIX')
+    skip('rdamp')
+    knob(2, 'rmix', 'MIX')
     ins('move', f'x0,{x("tmix")}')
-    knob(3, 'CHORUS: dk = depth*256 = q >> 7')
+    ins('move', '#>$1,a')
+    ins('move', f'a,{x("abd")}')
+    skip('rmix')
+    knob(3, 'rchor', 'CHORUS: dk = depth*256 = q >> 7')
     ins('move', 'x0,a')
     ins('asr', '#$7,a,a')
     ins('move', f'a1,{x("tdk")}')
-    knob(4, f'PRE: q * {pre_k} samples')
+    skip('rchor')
+    knob(4, 'rpre', f'PRE: q * {pre_k} samples')
     ins('move', f'#>{pre_k},y1')
     ins('mpy', 'x0,y1,a')
     ins('move', f'a1,{x("tpre")}', 'the integer, floored')
-    ins('move', 'x:(r6+$5),a', 'WIDTH: w/2 of the side gain')
-    ins('and', '#>$7f0000,a')
-    ins('move', 'a1,x0')
+    skip('rpre')
+    knob(5, 'rwid', 'WIDTH: w/2 of the side gain', scale=False)
     ins('move', '#>$400000,a')
     ins('cmp', 'x0,a')
     ins('bge', 'dv_wsml')
@@ -336,6 +385,14 @@ def generate():
     emit('dv_wsml:')
     ins('move', f'x0,{x("twid")}', 'up to 64: k/128')
     emit('dv_wset:')
+    ins('move', '#>$1,a')
+    ins('move', f'a,{x("abd")}')
+    skip('rwid')
+    ins('move', f'{x("abd")},a', 'MIX or WIDTH moved:')
+    ins('tst', 'a')
+    ins('beq', 'dv_skip_abd')
+    ins('clr', 'a')
+    ins('move', f'a,{x("abd")}')
     ins('move', f'{x("twid")},a', 'A, B = mix * (1/4 +- width/4), D = (1 - mix) / 8')
     ins('asr', '#$1,a,a')
     ins('move', 'a,x1')
@@ -354,7 +411,8 @@ def generate():
     ins('sub', 'x0,a')
     ins('asr', f'#${ref.MIX_SHIFT:x},a,a')
     ins('move', f'a,{x("tD")}')
-    knob(0xc, 'LOWCUT (slot 6): hp = 0.002 + 0.098q^2')
+    emit('dv_skip_abd:')
+    knob(0xc, 'rlcut', 'LOWCUT (slot 6): hp = 0.002 + 0.098q^2')
     ins('move', 'x0,y1')
     ins('mpy', 'x0,y1,a')
     ins('move', 'a,x0')
@@ -363,16 +421,21 @@ def generate():
     ins('move', f'#>{q(0.002)},x0')
     ins('add', 'x0,a')
     ins('move', f'a,{x("thpc")}')
-    knob(0xd, 'DIFF (slot 8): the LATE share')
+    skip('rlcut')
+    knob(0xd, 'rdiff', 'DIFF (slot 8): the LATE share')
     ins('move', f'x0,{x("tdiff")}')
-    knob(0xe, f'RATE (slot 10): the LFO steps, {ref.RATE_L} / {ref.RATE_R} (base, span)')
-    for sd, (base, span) in (('L', ref.RATE_L), ('R', ref.RATE_R)):
-        ins('move', f'#>{span},y1')
+    skip('rdiff')
+    knob(0xe, 'rrate', 'RATE (slot 10): the wander phases\' steps, x16 (a block at a time)')
+    for slot, (base, span) in (('stepL', ref.RATE_L), ('stepR', ref.RATE_R),
+                               ('stepbL', ref.RATE_LB), ('stepbR', ref.RATE_RB)):
+        ins('move', f'#>{span},y1', f'{slot}: {base} + q * {span}')
         ins('mpy', 'x0,y1,a')
         ins('move', 'a1,x1', 'floored; drop a0')
         ins('move', f'#>{base},a')
         ins('add', 'x1,a')
-        ins('move', f'a,{x("step" + sd)}')
+        ins('asl', '#$4,a,a')
+        ins('move', f'a,{x(slot)}')
+    skip('rrate')
     emit('; ---- smoothing: the first ready call snaps, every later one glides ----')
     ins('move', f'{x("snap")},a')
     ins('tst', 'a')
@@ -435,7 +498,34 @@ def generate():
         ins('sub', 'x0,a')
         ins('asr', '#$8,a,a')
         ins('move', f'a,{x("d" + name)}')
+    emit('; ---- the wander: a target 16 samples on, once a full call ----')
+    emit('; From one a != 0 call to the next is 16 samples whatever the split, so')
+    emit('; the step is (target - e) / 16: a split block\'s first call carries the')
+    emit('; same straight piece on and lands on the target, never past it.')
+    for sd in 'LR':
+        ins('move', f'{x("ph" + sd)},a', f'{sd}: A and B on 16 samples; p = (|A| + |B|) / 2')
+        ins('move', f'{x("step" + sd)},x0')
+        ins('add', 'x0,a')
+        ins('move', f'a1,{x("ph" + sd)}', 'wraps: a1 is stored raw')
+        ins('abs', 'a', 'unwrapped')
+        ins('move', f'{x("phb" + sd)},b')
+        ins('move', f'{x("stepb" + sd)},x0')
+        ins('add', 'x0,b')
+        ins('move', f'b1,{x("phb" + sd)}')
+        ins('abs', 'b')
+        ins('add', 'a,b')
+        ins('asr', '#$1,b,b')
+        ins('move', 'b,x0', 'p, saturated at the largest word')
+        ins('move', f'{x("dk")},y1')
+        ins('mpy', 'x0,y1,a', 'a1 = the target, p * dk')
+        ins('move', 'a1,x1')
+        ins('move', 'x1,a')
+        ins('move', f'{x("e" + sd)},x0')
+        ins('sub', 'x0,a')
+        ins('asr', '#$4,a,a', '(target - e) / 16, floored')
+        ins('move', f'a1,{x("de" + sd)}')
     emit('; ---- the sample loop ----')
+    emit('dv_loop:')
     ins('move', '#>$1,n0')
     ins('move', '#>$3fff,m4')
     ins('move', '#>$3fff,m5')
@@ -446,8 +536,11 @@ def generate():
         ins('move', f'{x("d" + name)},x0')
         ins('add', 'x0,a')
         ins('move', f'a,{x("c" + name)}')
-    lfo('L')
-    lfo('R')
+    for sd in 'LR':
+        ins('move', f'{x("e" + sd)},a', f'e{sd} += de{sd}: the wander, a straight piece a call')
+        ins('move', f'{x("de" + sd)},x0')
+        ins('add', 'x0,a')
+        ins('move', f'a,{x("e" + sd)}')
     side('L')
     side('R')
     emit('; ---- output: L = A*wl + B*wr + D*dryL, R = A*wr + B*wl + D*dryR, /8 ----')
@@ -472,17 +565,6 @@ def generate():
     ins('move', f'r5,{x("head")}')
     ins('move', '#>$ffffff,m4')
     ins('move', '#>$ffffff,m5')
-    ins('rts')
-    emit('')
-    emit('; k/127 of a knob word in a: x0 = w + w/127, saturated. Clobbers a, y1.')
-    emit('; After proc: dsp_asm cannot encode a backward bsr.')
-    emit('dv_q:')
-    ins('and', '#>$7f0000,a', 'an LFO leaves bits 8-15 set')
-    ins('move', 'a1,x0')
-    ins('move', '#>$010204,y1', '1/127')
-    ins('mpy', 'x0,y1,a')
-    ins('add', 'x0,a')
-    ins('move', 'a,x0', '127 -> the largest word')
     ins('rts')
     emit('')
     text = '\n'.join(out) + '\n'
