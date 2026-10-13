@@ -215,6 +215,46 @@ checked for overload artifacts.
 - **The near-freeze in fixed point:** a full-scale input at DECAY 127 is
   not gated for clipping inside the loop.
 
+## Ideas not taken, with their costs
+
+The budget left is ~0.7% (about 2 instructions a sample), so each of these
+has to pay for itself, most simply by dropping the absorb/feedback ramps
+(8 a sample, DECAY jumps click again).
+
+| idea | cost a sample | note |
+|---|---|---|
+| a squared CHOR curve | 0 | on the unit CHOR felt extreme at the top: most of the knob's travel in the subtle range |
+| bass decay (LCUT as a low shelf: centre flat, one side cuts, the other lets lows ring) | ~4 | `x - (1 - k) * LP2` in the loop |
+| true freeze at DECAY 127 (input muted, loop lossless) | ~4 | needs a per-sample input gain; declined for now (13 Oct 2026) |
+| early reflections: 2-4 taps from the pre-delay line into the output | ~12 | no memory; could ride DIFF |
+| SIZE: every delay scaled 50-100% | small, per block | no memory; needs a knob, and every proven slot is taken (page 2's odd slots are unproven) |
+| an output gate (PLATE REV's GATE: an envelope follower) | per block, mostly | `docs/firmware/REVERBS.md` |
+| the tank at half rate (DARK REV's trick) | about halves the loop | costs the top octave |
+| a clean PRE glide (an interpolated pre-delay read) | ~28 | see Open |
+| PRE past 61 ms | ~10 for 12-bit storage | a mono pre-delay line reaches ~120 ms for nothing but true-stereo input |
+
+## Voicing notes
+
+What listening said (the author, renders and the unit, 12-13 Oct 2026):
+six allpasses a side sound like eight (6 is the voice); FIG8 VERB is
+preferred to Mini Verb, the loop high-pass the clearest reason; it
+shimmers more than Mini Verb; its true-stereo input is not obvious on mono
+or centred material; WIDTH 0 is mono by design (64 is the setting to
+compare with a reverb without a width control); BAL and OFFST were heard
+only at their ends or not at all and became DIFF and RATE; CHOR at its new
+depth reads as extreme near the top. The defaults (DECAY 96 ~6.7 s,
+CHOR 48, RATE 20) are first guesses.
+
+## Audition
+
+`audition.py` renders a WAV through the assembled DSP code (not the
+reference), one instance, panel knob names:
+
+```sh
+python3 modules/fig8verb/audition.py IN.wav OUT.wav MIX=100 CHOR=80 RATE=30 --tail 4
+python3 modules/fig8verb/fig8verb_ref.py IN.wav OUT.wav DECAY=110 CHORUS=100   # the float reference, faster
+```
+
 ## Gates
 
 ```sh
