@@ -52,6 +52,7 @@ EARLY_AP = 2             # DIFF's grainy end: the tap after this allpass
 #   left  38 + q*1484  (0.10 .. 4.0 Hz), right 50 + q*1944 (1.31x the left)
 RATE_L, RATE_R = (38, 1484), (50, 1944)
 IN_SHIFT, OUT_SHIFT = 3, 2   # tank input /8, wet output x4: -18 dB headroom
+MIX_SHIFT = 3                # the output mix's coefficients are held /8
 
 # Knobs, 0..127 as the panel sends them.
 # WIDTH: wet mid/side, 0 mono, 64 as the tank makes it, 127 side x1.5
@@ -119,8 +120,12 @@ def laws(k):
         half=qc >> 8,                    # depth/2 * 256
         late=q['DIFF'],                  # LATE share; EARLY gets the rest
         step=(RATE_L[0] + ((qr * RATE_L[1]) >> 23), RATE_R[0] + ((qr * RATE_R[1]) >> 23)),
-        mix=q['MIX'],
-        width=2 * wq,                    # side gain: 0..1 to the centre, 1..1.5 above
+        # The output is one 2x2 mix: L = A*wl + B*wr + D*dryL, R = A*wr + B*wl + D*dryR,
+        # every coefficient held /8. MIX, WIDTH (side gain 2*wq) and the x4 makeup
+        # fold into A and B: x4 * mix * ((1 +- side) / 2) / 8.
+        cA=q['MIX'] * (0.25 + wq / 2),
+        cB=q['MIX'] * (0.25 - wq / 2),
+        cD=(1 - q['MIX']) / 8,
         pre=(pre, pre),
     )
 
@@ -153,8 +158,9 @@ def render(left, right, knobs, aps=APS):
                           lp=0.0, hp=0.0, out=0.0, early=0.0, late=0.0))
     out_l, out_r = [0.0] * n, [0.0] * n
     absorb, fb, lp, hp = c['absorb'], c['fb'], c['lp'], c['hp']
-    dk, half, late, mix, width = c['dk'], c['half'], c['late'], c['mix'], c['width']
-    gin, gout = 1 / (1 << IN_SHIFT), 1 << OUT_SHIFT
+    dk, half, late = c['dk'], c['half'], c['late']
+    cA, cB, cD = c['cA'], c['cB'], c['cD']
+    gin, gmix = 1 / (1 << IN_SHIFT), 1 << MIX_SHIFT
     head = 0
 
     for i in range(n):
@@ -199,10 +205,8 @@ def render(left, right, knobs, aps=APS):
 
         wl = sides[0]['early'] + late * (sides[0]['late'] - sides[0]['early'])
         wr = sides[1]['early'] + late * (sides[1]['late'] - sides[1]['early'])
-        m, sd = 0.5 * (wl + wr), 0.5 * (wl - wr) * width
-        wet = (max(-1.0, min(1.0, (m + sd) * gout)), max(-1.0, min(1.0, (m - sd) * gout)))
-        out_l[i] = dry[0] + mix * (wet[0] - dry[0])
-        out_r[i] = dry[1] + mix * (wet[1] - dry[1])
+        out_l[i] = max(-1.0, min(1.0, gmix * (cA * wl + cB * wr + cD * dry[0])))
+        out_r[i] = max(-1.0, min(1.0, gmix * (cA * wr + cB * wl + cD * dry[1])))
     return out_l, out_r
 
 

@@ -20,15 +20,15 @@
 ;   ap6R   13627
 ;   loopR  14329
 ;   end    16320
-; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, lateL $22, lateR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tdiff $36, twid $37, tpre $38, pre $3a, snap $3c, stepL $3d, stepR $3e, cabsorb $40, cfb $41, cmix $42, cdiff $43, cwid $44, dabsorb $48, dfb $49, dmix $4a, ddiff $4b, dwid $4c
+; x:(r7+$xx): base $00, head $01, clear $02, lpc $06, hpc $07, dk $08, b1L $09, b1R $0a, b9L $0b, b9R $0c, prnL $0d, prnR $0e, phL $14, phR $15, eL $16, eR $17, lpL $18, hpL $19, lpR $1a, hpR $1b, outL $1c, outR $1d, noutL $1e, lpLlo $24, hpLlo $25, lpRlo $26, hpRlo $27, earlyL $20, earlyR $21, wL $22, wR $23, tabsorb $30, tfb $31, tlpc $32, thpc $33, tdk $34, tmix $35, tdiff $36, twid $37, tpre $38, pre $3a, snap $3c, stepL $3d, stepR $3e, cabsorb $40, cfb $41, cdiff $43, cA $44, cB $45, cD $46, dabsorb $48, dfb $49, ddiff $4b, dA $4c, dB $4d, dD $4e, tA $4f, tB $50, tD $51
 ; Moving taps are P = (16384 - start - delay) * 256, positive, 8 fraction bits.
-; Only the mpy/mac forms AGENTS.md lists as signed: x0,y1 and y0,x0.
+; mpy/mac operand pairs: x0,y1 and y0,x0 (AGENTS.md), x1,y0 and y1,x1 (stock runs both).
 
 init:
         move    #>$ffffff,m4
         move    r7,r4
         clr     a
-        do      #$50,>dv_zero           ; every slot the loop reads
+        do      #$58,>dv_zero           ; every slot the loop reads
         move    a,x:(r4)+
 dv_zero:
         nop     
@@ -115,6 +115,24 @@ dv_ready:
 dv_wsml:
         move    x0,x:(r7+$37)           ; up to 64: k/128
 dv_wset:
+        move    x:(r7+$37),a            ; A, B = mix * (1/4 +- width/4), D = (1 - mix) / 8
+        asr     #$1,a,a
+        move    a,x1
+        move    #>$200000,a
+        add     x1,a
+        move    a,y1
+        move    x:(r7+$35),x0
+        mpy     x0,y1,a
+        move    a,x:(r7+$4f)
+        move    #>$200000,a
+        sub     x1,a
+        move    a,y1
+        mpy     x0,y1,a
+        move    a,x:(r7+$50)
+        move    #>$7fffff,a
+        sub     x0,a
+        asr     #$3,a,a
+        move    a,x:(r7+$51)
         move    x:(r6+$c),a             ; LOWCUT (slot 6): hp = 0.002 + 0.098q^2
         bsr     dv_q
         move    x0,y1
@@ -158,12 +176,14 @@ dv_wset:
         move    x0,x:(r7+$40)
         move    x:(r7+$31),x0
         move    x0,x:(r7+$41)
-        move    x:(r7+$35),x0
-        move    x0,x:(r7+$42)
         move    x:(r7+$36),x0
         move    x0,x:(r7+$43)
-        move    x:(r7+$37),x0
+        move    x:(r7+$4f),x0
         move    x0,x:(r7+$44)
+        move    x:(r7+$50),x0
+        move    x0,x:(r7+$45)
+        move    x:(r7+$51),x0
+        move    x0,x:(r7+$46)
         move    #>$1,a
         move    a,x:(r7+$3c)
         bra     dv_derive
@@ -247,21 +267,26 @@ dv_derive:
         sub     x0,a
         asr     #$8,a,a
         move    a,x:(r7+$49)
-        move    x:(r7+$35),a            ; the mix ramp: (target - now) / 256 a sample
-        move    x:(r7+$42),x0
-        sub     x0,a
-        asr     #$8,a,a
-        move    a,x:(r7+$4a)
         move    x:(r7+$36),a            ; the diff ramp: (target - now) / 256 a sample
         move    x:(r7+$43),x0
         sub     x0,a
         asr     #$8,a,a
         move    a,x:(r7+$4b)
-        move    x:(r7+$37),a            ; the wid ramp: (target - now) / 256 a sample
+        move    x:(r7+$4f),a            ; the A ramp: (target - now) / 256 a sample
         move    x:(r7+$44),x0
         sub     x0,a
         asr     #$8,a,a
         move    a,x:(r7+$4c)
+        move    x:(r7+$50),a            ; the B ramp: (target - now) / 256 a sample
+        move    x:(r7+$45),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$4d)
+        move    x:(r7+$51),a            ; the D ramp: (target - now) / 256 a sample
+        move    x:(r7+$46),x0
+        sub     x0,a
+        asr     #$8,a,a
+        move    a,x:(r7+$4e)
 ; ---- the sample loop ----
         move    #>$1,n0
         move    #>$3fff,m4
@@ -276,18 +301,22 @@ dv_derive:
         move    x:(r7+$49),x0
         add     x0,a
         move    a,x:(r7+$41)
-        move    x:(r7+$42),a            ; mix ramps
-        move    x:(r7+$4a),x0
-        add     x0,a
-        move    a,x:(r7+$42)
         move    x:(r7+$43),a            ; diff ramps
         move    x:(r7+$4b),x0
         add     x0,a
         move    a,x:(r7+$43)
-        move    x:(r7+$44),a            ; wid ramps
+        move    x:(r7+$44),a            ; A ramps
         move    x:(r7+$4c),x0
         add     x0,a
         move    a,x:(r7+$44)
+        move    x:(r7+$45),a            ; B ramps
+        move    x:(r7+$4d),x0
+        add     x0,a
+        move    a,x:(r7+$45)
+        move    x:(r7+$46),a            ; D ramps
+        move    x:(r7+$4e),x0
+        add     x0,a
+        move    a,x:(r7+$46)
         move    x:(r7+$14),a            ; LFO L: phase += RATE step, p = |phase|
         move    x:(r7+$3d),x0
         add     x0,a
@@ -307,38 +336,34 @@ dv_derive:
         mpy     x0,y1,a                 ; a1 = p * depth * 256, an integer
         move    a1,x:(r7+$17)
 ; ---- side L ----
+        move    #>$000000,n5
         move    x:(r0),a                ; L in
         asr     #$3,a,a                 ; tank headroom
-        move    #>$000000,n5
         move    a,y:(r5+n5)
         move    x:(r7+$0d),n5           ; pre-delay read, per block
-        move    y:(r5+n5),a
         move    x:(r7+$1d),x0           ; the figure-eight: R loop output, last sample
         move    x:(r7+$41),y1
+        move    y:(r5+n5),a
         mac     x0,y1,a
         move    x:(r7+$18),b            ; one-pole LP, DAMP
         move    x:(r7+$24),b0           ; its low word: the state keeps 48 bits
         sub     b,a
-        rnd     a
         move    a,x0
         move    x:(r7+$06),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x:(r7+$18)
         move    a0,x:(r7+$24)
-        rnd     a
         move    a,x1                    ; one-pole HP, LOWCUT: x - LP(x)
         move    x:(r7+$19),b
         move    x:(r7+$25),b0           ; its low word: the state keeps 48 bits
         sub     b,a
-        rnd     a
         move    a,x0
         move    x:(r7+$07),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x:(r7+$19)
         move    a0,x:(r7+$25)
-        rnd     a
         move    x1,b
         sub     a,b
         move    b,x1                    ; park x - LP(x); AP1L 293 +- depth/2, g=0.65
@@ -351,71 +376,77 @@ dv_derive:
         lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
         move    b1,y0                   ; f, the fraction toward the newer word
+        move    #>$ffeae6,n5            ; AP1 write, ahead
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
         move    a,x0
         mpy     y0,x0,a
         add     b,a
-        move    a,x0
+        move    a,x0                    ; d
         move    x:(r7+$40),y0           ; absorb, held in y0 through the chain
         move    x1,a                    ; x back
         mpy     y0,x0,b       #>$533333,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffeae6,n5
         move    a,y:(r5+n5)
+        move    #>$ffe622,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffe622,n5            ; AP2L 797, g=0.62
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP2L 797, g=0.62
+        move    #>$ffe93f,n5
         mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffe93f,n5
         move    b,y:(r5+n5)
+        move    #>$ffe3d0,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$20)            ; EARLY tap
-        move    #>$ffe3d0,n5            ; AP3L 593, g=0.62
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP3L 593, g=0.62
+        move    #>$ffe621,n5
         mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe621,n5
         move    a,y:(r5+n5)
+        move    #>$ffe27e,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffe27e,n5            ; AP4L 337, g=0.6
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP4L 337, g=0.6
+        move    #>$ffe3cf,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffe3cf,n5
         move    b,y:(r5+n5)
+        move    #>$ffe08a,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    #>$ffe08a,n5            ; AP5L 499, g=0.6
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP5L 499, g=0.6
+        move    #>$ffe27d,n5
         mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe27d,n5
         move    a,y:(r5+n5)
+        move    #>$ffddba,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffddba,n5            ; AP6L 719, g=0.6
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP6L 719, g=0.6
+        move    #>$ffe089,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffe089,n5
         move    b,y:(r5+n5)
+        move    #>$ffddb9,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    a,x:(r7+$22)            ; LATE tap
-        move    #>$ffddb9,n5            ; loop delay 1867 + depth - e
-        move    a,y:(r5+n5)
+        move    a,y:(r5+n5)             ; LATE into the loop delay 1867 + depth - e
+        move    x:(r7+$20),b            ; wL = early + diff*(late - early)
+        sub     b,a
+        move    a,x0
+        move    x:(r7+$43),y1
+        mpy     x0,y1,a
+        add     b,a
+        move    a,x:(r7+$22)
         move    x:(r7+$0b),a
         move    x:(r7+$16),x0
         add     x0,a                    ; P = B9 + e
@@ -425,6 +456,7 @@ dv_derive:
         lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
         move    b1,y0                   ; f, the fraction toward the newer word
+        move    #>$fff573,n5            ; R pre write, ahead
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
@@ -435,36 +467,31 @@ dv_derive:
 ; ---- side R ----
         move    x:(r0+n0),a             ; R in
         asr     #$3,a,a                 ; tank headroom
-        move    #>$fff573,n5
         move    a,y:(r5+n5)
         move    x:(r7+$0e),n5           ; pre-delay read, per block
-        move    y:(r5+n5),a
         move    x:(r7+$1c),x0           ; the figure-eight: L loop output, last sample
         move    x:(r7+$41),y1
+        move    y:(r5+n5),a
         mac     x0,y1,a
         move    x:(r7+$1a),b            ; one-pole LP, DAMP
         move    x:(r7+$26),b0           ; its low word: the state keeps 48 bits
         sub     b,a
-        rnd     a
         move    a,x0
         move    x:(r7+$06),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x:(r7+$1a)
         move    a0,x:(r7+$26)
-        rnd     a
         move    a,x1                    ; one-pole HP, LOWCUT: x - LP(x)
         move    x:(r7+$1b),b
         move    x:(r7+$27),b0           ; its low word: the state keeps 48 bits
         sub     b,a
-        rnd     a
         move    a,x0
         move    x:(r7+$07),y1
         mpy     x0,y1,a
         add     b,a
         move    a,x:(r7+$1b)
         move    a0,x:(r7+$27)
-        rnd     a
         move    x1,b
         sub     a,b
         move    b,x1                    ; park x - LP(x); AP1R 359 +- depth/2, g=0.65
@@ -477,71 +504,77 @@ dv_derive:
         lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
         move    b1,y0                   ; f, the fraction toward the newer word
+        move    #>$ffd56c,n5            ; AP1 write, ahead
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
         move    a,x0
         mpy     y0,x0,a
         add     b,a
-        move    a,x0
+        move    a,x0                    ; d
         move    x:(r7+$40),y0           ; absorb, held in y0 through the chain
         move    x1,a                    ; x back
         mpy     y0,x0,b       #>$533333,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffd56c,n5
         move    a,y:(r5+n5)
+        move    #>$ffd07e,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffd07e,n5            ; AP2R 773, g=0.62
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP2R 773, g=0.62
+        move    #>$ffd383,n5
         mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffd383,n5
         move    b,y:(r5+n5)
+        move    #>$ffcdfc,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$21)            ; EARLY tap
-        move    #>$ffcdfc,n5            ; AP3R 641, g=0.62
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP3R 641, g=0.62
+        move    #>$ffd07d,n5
         mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffd07d,n5
         move    a,y:(r5+n5)
+        move    #>$ffcc9a,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffcc9a,n5            ; AP4R 353, g=0.6
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP4R 353, g=0.6
+        move    #>$ffcdfb,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffcdfb,n5
         move    b,y:(r5+n5)
+        move    #>$ffcac6,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    #>$ffcac6,n5            ; AP5R 467, g=0.6
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP5R 467, g=0.6
+        move    #>$ffcc99,n5
         mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
         mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffcc99,n5
         move    a,y:(r5+n5)
+        move    #>$ffc808,n5
         move    a,x0
         mac     x0,y1,b                 ; y = s + g*w
-        move    #>$ffc808,n5            ; AP6R 701, g=0.6
-        move    y:(r5+n5),x0
+        move    y:(r5+n5),x0            ; AP6R 701, g=0.6
+        move    #>$ffcac5,n5
         mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
         mac     -x0,y1,b                ; w = x - g*s
-        move    #>$ffcac5,n5
         move    b,y:(r5+n5)
+        move    #>$ffc807,n5
         move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
-        move    a,x:(r7+$23)            ; LATE tap
-        move    #>$ffc807,n5            ; loop delay 1733 + depth - e
-        move    a,y:(r5+n5)
+        move    a,y:(r5+n5)             ; LATE into the loop delay 1733 + depth - e
+        move    x:(r7+$21),b            ; wR = early + diff*(late - early)
+        sub     b,a
+        move    a,x0
+        move    x:(r7+$43),y1
+        mpy     x0,y1,a
+        add     b,a
+        move    a,x:(r7+$23)
         move    x:(r7+$0c),a
         move    x:(r7+$17),x0
         add     x0,a                    ; P = B9 + e
@@ -551,6 +584,7 @@ dv_derive:
         lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
         move    b1,y0                   ; f, the fraction toward the newer word
+        move    x:(r7+$22),x1           ; wl, for the output
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
@@ -558,53 +592,23 @@ dv_derive:
         mpy     y0,x0,a
         add     b,a
         move    a,x:(r7+$1d)            ; L has read it
-; ---- output: DIFF, WIDTH, makeup, MIX ----
-        move    x:(r7+$20),b            ; wl = early + diff*(late - early)
-        move    x:(r7+$22),a
-        sub     b,a
-        move    a,x0
-        move    x:(r7+$43),y1
-        mpy     x0,y1,a
-        add     b,a
-        move    a,x1
-        move    x:(r7+$21),b            ; wr = early + diff*(late - early)
-        move    x:(r7+$23),a
-        sub     b,a
-        move    a,x0
-        mpy     x0,y1,a
-        add     b,a
-        move    a,x0
-        move    x1,a
-        sub     x0,a                    ; wl - wr
-        move    x1,b
-        add     x0,b
-        asr     #$1,b,b                 ; m = (wl + wr) / 2
-        move    a,x0
-        move    x:(r7+$44),y1
-        mpy     x0,y1,a                 ; sd = (wl - wr) * width/2
-        move    a,x0
-        move    b,a
-        add     x0,a                    ; L = m + sd
-        sub     x0,b                    ; R = m - sd
-        asl     #$2,a,a                 ; makeup
-        asl     #$2,b,b
-        move    b,x1                    ; limited: the output clip
-        move    a,y0
-        move    x:(r7+$42),y1
-        move    x:(r0),b                ; L = dry + mix*(wet - dry)
-        move    y0,a
-        sub     b,a
-        move    a,x0
-        mpy     x0,y1,a
-        add     b,a
+; ---- output: L = A*wl + B*wr + D*dryL, R = A*wr + B*wl + D*dryR, /8 ----
+        move    x:(r7+$23),x0           ; wr; wl is in x1
+        move    x:(r7+$44),y0
+        move    x:(r7+$45),y1
+        mpy     x1,y0,a                 ; A*wl
+        mac     x0,y1,a                 ; + B*wr
+        mpy     y0,x0,b                 ; A*wr
+        mac     y1,x1,b                 ; + B*wl
+        move    x:(r7+$46),y0
+        move    x:(r0),x0               ; dry
+        mac     y0,x0,a
+        asl     #$3,a,a                 ; x8; the store limits: the output clip
         move    a,x:(r0)+
-        move    x:(r0),b                ; R = dry + mix*(wet - dry)
-        move    x1,a
-        sub     b,a
-        move    a,x0
-        mpy     x0,y1,a
-        add     b,a
-        move    a,x:(r0)+
+        move    x:(r0),x0               ; dry
+        mac     y0,x0,b
+        asl     #$3,b,b                 ; x8; the store limits: the output clip
+        move    b,x:(r0)+
         move    x:(r7+$1e),x0
         move    x0,x:(r7+$1c)
         move    (r5)+
