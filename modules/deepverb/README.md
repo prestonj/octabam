@@ -139,7 +139,14 @@ played. BAL was audible only at its ends and OFFST not at all once a tail
 had formed (both move only the onset); CHOR was subtle and PRE short. This
 voice answers those: OFFST's memory went to CHOR (twice the depth) and PRE
 (61 ms), BAL became DIFF with its grainy tap two allpasses earlier, and
-RATE took OFFST's slot. **This voice is not flashed yet.**
+RATE took OFFST's slot.
+
+OCTABAM11 (remix `verbs`), the author's unit, 13 Oct 2026: the current
+voice (the wander, four a core at 99.3% of the budget by instruction
+count). Four DEEP VERBs on FX2 and four FILTERs on FX1 of tracks 1-4,
+all eight effects on one core: the unit did not hang and it sounded
+good. Not measured: a burn reading of the spare cycles, or a capture
+checked for overload artifacts.
 
 ## Measured (12 Oct 2026, `dsp_host`)
 

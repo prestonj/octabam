@@ -11,7 +11,7 @@ Both are FX2 only and each instance takes the track's 16K FX2 buffer.
 
 ## Status
 
-OCTABAM9, the author's unit, 12 Oct 2026, with DEEP VERB's previous voice (BAL, OFFST): both reverbs ran; DEEP VERB preferred (`modules/deepverb/README.md`, On the unit). The current voice (DIFF, RATE) is local only.
+OCTABAM9 and OCTABAM11, the author's unit, 12-13 Oct 2026: both reverbs ran; DEEP VERB preferred. OCTABAM11 (the current voice) carried four DEEP VERBs and four FILTERs on tracks 1-4 without a hang (`modules/deepverb/README.md`, On the unit).
 
 ## Build
 

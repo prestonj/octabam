@@ -15,7 +15,7 @@ _BLANK = Param(b"", 0)
 MODULE = Module(
     name="deepverb", key="DEEPVERB", kind=Kind.DSP_EFFECT,
     category=Category.TRACK, author="prestonj", author_url="https://github.com/prestonj",
-    proof=Proof.RENDER, proof_note="`make verify-deepverb`; not flashed",
+    proof=Proof.HARDWARE, proof_note="the author's unit, OCTABAM11 (remix verbs), 13 Oct 2026: four DEEP VERBs + four FILTERs on tracks 1-4, no hang",
     doc="Stereo figure-eight allpass reverb: deep chorus with a rate, diffusion, width.",
     menu=MenuEntry(fx2_id=0x1b, donor_desc=0x400d58b8,    # DARK REV's descriptor
                    abbr=b"DEEP", fullname=b"DEEP VERB", build_tag=False),
