@@ -11,6 +11,7 @@ Each carries one module, or one combination, for that module's gates: `make chec
 | [`cfmeter-post`](cfmeter-post/README.md) | octatrick (less TUNER and USB AUDIO IN) + CF METER on T8's FX2, with USB AUDIO OUT TRACKS POST in place of TRACKS MAIN CUE: the layout's ColdFire cost, over USB. | port-gated: the readout chain under the port |
 | [`cfmeter-tracks`](cfmeter-tracks/README.md) | octatrick (less TUNER and USB AUDIO IN) + CF METER on T8's FX2, with USB AUDIO OUT TRACKS in place of TRACKS MAIN CUE: the layout's ColdFire cost, over USB. | port-gated: the readout chain under the port |
 | [`character-txtr`](character-txtr/README.md) | bottleservice with CHARACTER TXTR (Character + Airwindows Pockey2 texture) on FX1 in place of CHARACTER: the image for measuring the texture stage's cost on a unit. | `make check` |
+| [`deepverb`](deepverb/README.md) | True-stereo figure-eight allpass reverb. | local render: `make verify-deepverb` |
 | [`direct-jump-kyoti`](direct-jump-kyoti/README.md) | stock effects with DIRECT_JUMP_KYOTI: [PTN] + [YES] toggles an immediate, clock-locked pattern change. | `make check` |
 | [`erase-empty-trigless-locks`](erase-empty-trigless-locks/README.md) | stock effects with ERASE_EMPTY_TRIGLESS_LOCKS: an emptied trigless lock disappears. | `make check` |
 | [`euclid`](euclid/README.md) | Euclid rhythmic modulation: 12 dB LP/BP/HP or AMP, both FX slots. | local render: the module's render gates |

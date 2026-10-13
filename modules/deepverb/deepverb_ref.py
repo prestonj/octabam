@@ -15,13 +15,15 @@ Each side of the loop, per sample:
        -> loop delay (modulated, linear interpolation) -> the other side
 
 A lossy allpass scales its delayed sample by ABSORB before the lattice:
-    s = absorb * d;  w = x + g*s;  y = s - g*w;  write w.
+    s = absorb * d;  w = x - g*s;  y = s + g*w;  write w.
 
 Every operation is one the DSP sample loop can do in the form it will be
 written: no per-sample division or transcendental; the coefficients are
-computed per 16-sample block, the LFOs are per-sample triangles.
+computed per 16-sample block, the LFOs are per-sample triangles. This file is
+the specification deepverb.asm is gated against: the arithmetic below is
+the DSP's (integer tap positions, LFO phase, gain staging), in float.
 
-    python3 modules/deepverb/deepverb_ref.py IN.wav OUT.wav [--aps 8] [knob=value ...]
+    python3 modules/deepverb/deepverb_ref.py IN.wav OUT.wav [knob=value ...]
 """
 import argparse
 import array
@@ -31,20 +33,23 @@ import wave
 
 FS = 44100
 BLOCK = 16
+RING = 16384             # the FX2 allocator buffer, one modulo ring
 
 # Allpass lengths per side, the first modulated (samples at 44.1 kHz, primes).
 # The voice runs the first six (6 and 8 sounded alike, 12 Oct 2026);
-# the last two are kept for comparison renders (--aps 8).
+# the last two are kept for comparison renders (--aps 8, float only).
 AP_L = (293, 797, 593, 337, 499, 719, 613, 853)
 AP_R = (359, 773, 641, 353, 467, 701, 587, 919)
 LOOP_L, LOOP_R = 1867, 1733
 AP_G = (0.65, 0.62, 0.62, 0.60, 0.60, 0.60, 0.60, 0.60)
+APS = 6
 
 DEPTH_MAX = 128          # samples, peak-to-peak excursion of a moving tap
-PRE_MAX_MS = 48.0        # both sides
-OFF_MAX_MS = 15.0        # OFFSET delays one side by up to this, on top of PRE
-                         # 6 allpasses: each pre-delay line 63 ms, 16,093 of 16,384 words
-LFO_HZ = (0.71, 0.93)    # left, right
+PRE_K = 2117             # PRE at 127: 48.0 ms
+OFF_K = 1344             # OFFSET: (k - 64) * 1344 / 128 = 10.5 samples a step, -672..+661
+PRE_LINE = PRE_K + 672   # longest pre-delay read, 63.2 ms
+LFO_STEP = (270, 354)    # per sample, of a 2^24 phase: 0.710 / 0.931 Hz
+IN_SHIFT, OUT_SHIFT = 3, 2   # tank input /8, wet output x4: -18 dB headroom
 
 # Knobs, 0..127 as the panel sends them.
 # OFFSET: 64 none, below delays the left side, above the right (+-15 ms).
@@ -52,99 +57,117 @@ LFO_HZ = (0.71, 0.93)    # left, right
 # (x2 clipped the wet output at full-scale input, 12 Oct 2026).
 DEFAULTS = dict(DECAY=96, DAMP=64, LOWCUT=16, CHORUS=48, BAL=96, MIX=127, PRE=0, OFFSET=64,
                 WIDTH=64)
+Q23 = 1 << 23
+
+
+def q23(v):
+    """A coefficient as the DSP holds it."""
+    return min(round(v * Q23), Q23 - 1)
+
+
+def knob_q(k):
+    """k/127 as deepverb.asm computes it: w + w*(1/127), w = k << 16,
+    saturated at the largest Q23 value."""
+    w = k << 16
+    return min(w + ((w * 0x010204) >> 23), Q23 - 1)
+
+
+def layout(aps=APS):
+    """Segment starts in the one ring (positions behind the write head):
+    pre L, pre R, then per side AP1..APn and the loop delay. Each segment
+    holds its longest read: AP1 m+64 and the loop L+128 (the moving taps),
+    one word of margin past each moving read."""
+    seg, at = {}, 0
+    for name in ('preL', 'preR'):
+        seg[name] = at
+        at += PRE_LINE + 1
+    for side, ap, loop in (('L', AP_L[:aps], LOOP_L), ('R', AP_R[:aps], LOOP_R)):
+        for j, m in enumerate(ap):
+            seg[f'ap{j + 1}{side}'] = at
+            at += m + (DEPTH_MAX // 2 + 2 if j == 0 else 1)
+        seg[f'loop{side}'] = at
+        at += loop + DEPTH_MAX + 2
+    seg['end'] = at
+    return seg
+
+
+def memory_words(aps=APS):
+    return layout(aps)['end']
 
 
 def laws(k):
-    """Panel knobs -> per-block coefficients. Every law is linear or a short
-    table on the unit; kept that simple here."""
+    """Panel knobs -> per-block values, in the DSP's integer forms."""
+    q = {name: knob_q(v) / Q23 for name, v in k.items()}
     # Squared in (1 - DECAY). At 127 the allpasses are lossless and the
     # cross-feed 0.99: only the loop filters remove energy, a near-freeze.
-    u = (1 - k['DECAY'] / 127) ** 2
-    c = dict(
-        absorb=1.0 - 0.15 * u,           # in every allpass (Q23 max on the DSP)
+    u = (1 - q['DECAY']) ** 2
+    qc = knob_q(k['CHORUS'])
+    kw = k['WIDTH'] << 16
+    wq = kw / Q23 if k['WIDTH'] <= 64 else 0.5 + (kw / Q23 - 0.5) * (0x410410 / Q23)
+    pre = (knob_q(k['PRE']) * PRE_K) >> 23
+    off = (((k['OFFSET'] - 64) << 16) * OFF_K) >> 23
+    return dict(
+        absorb=1.0 - 0.15 * u,           # in every allpass
         fb=0.99 - 0.49 * u,              # cross-feed, at most 0.99
         # one-pole LP coefficient: 0.95 (bright) .. 0.15 (dark)
-        lp=0.95 - 0.80 * k['DAMP'] / 127,
+        lp=0.95 - 0.80 * q['DAMP'],
         # one-pole HP (x - LP of x): 0.002 (~14 Hz) .. 0.10 (~740 Hz)
-        hp=0.002 + 0.098 * (k['LOWCUT'] / 127) ** 2,
-        depth=DEPTH_MAX * k['CHORUS'] / 127,
-        late=k['BAL'] / 127,             # LATE share; EARLY gets the rest
-        mix=k['MIX'] / 127,
-        # side gain: 0..1 below the centre, 1..1.5 above it
-        width=(k['WIDTH'] / 64 if k['WIDTH'] <= 64 else 1 + 0.5 * (k['WIDTH'] - 64) / 63),
-        pre=int(round(PRE_MAX_MS * FS / 1000 * k['PRE'] / 127)),
-        off=int(round(OFF_MAX_MS * FS / 1000 * max(-63, k['OFFSET'] - 64) / 63)),
+        hp=0.002 + 0.098 * q['LOWCUT'] ** 2,
+        dk=qc >> 8,                      # depth * 256, 0..32767
+        half=qc >> 9,                    # depth/2 * 256
+        late=q['BAL'],                   # LATE share; EARLY gets the rest
+        mix=q['MIX'],
+        width=2 * wq,                    # side gain: 0..1 to the centre, 1..1.5 above
+        pre=(pre + max(0, -off), pre + max(0, off)),
     )
-    return c
 
 
-class Ring:
-    """One delay line: write at the head, read back d samples (d >= 1)."""
-    __slots__ = ('buf', 'mask', 'head')
-
-    def __init__(self, longest):
-        size = 1
-        while size < longest + 4:
-            size <<= 1
-        self.buf = [0.0] * size
-        self.mask = size - 1
-        self.head = 0
+def _tap(buf, head, t256):
+    """Linear interpolation at t256/256 samples behind head, as the DSP
+    reads it: d0 = ceil, f = the fraction below it."""
+    d0 = -((-t256) // 256)
+    f = ((-t256) % 256) / 256
+    a = buf[(head - d0) % RING]
+    return a + f * (buf[(head - d0 + 1) % RING] - a)
 
 
-def memory_words(aps):
-    """Ring positions the DSP layout needs (one 16K ring, segments as in
-    Mini Verb): each line's longest read plus the write, moving taps with
-    their excursion and the interpolation neighbour, both pre-delays."""
-    line = int((PRE_MAX_MS + OFF_MAX_MS) * FS / 1000)
-    half = DEPTH_MAX // 2
-    total = 2 * (line + 1)
-    for ap, loop in ((AP_L[:aps], LOOP_L), (AP_R[:aps], LOOP_R)):
-        total += ap[0] + half + 2                 # AP1 swings +-half
-        total += sum(n + 1 for n in ap[1:])
-        total += loop + DEPTH_MAX + 2             # loop delay swings 0..DEPTH
-    return total
-
-
-def render(left, right, knobs, aps=6):
-    """left/right: lists of floats in -1..1. Returns (out_l, out_r)."""
+def render(left, right, knobs, aps=APS):
+    """left/right: lists of floats in -1..1. Returns (out_l, out_r).
+    The arithmetic is the DSP's in float: one ring, integer tap positions
+    with 8 fraction bits, the same LFO phase and the same gain staging."""
     k = dict(DEFAULTS, **knobs)
     c = laws(k)
+    seg = layout(aps)
+    if seg['end'] > RING:
+        sys.exit(f'{aps} allpasses need {seg["end"]} words, the ring is {RING}')
+    ring = [0.0] * RING
     n = len(left)
-    pre_max = int((PRE_MAX_MS + OFF_MAX_MS) * FS / 1000) + 2
-    side = []
-    for ap, loop, hz in ((AP_L[:aps], LOOP_L, LFO_HZ[0]), (AP_R[:aps], LOOP_R, LFO_HZ[1])):
-        side.append(dict(
-            pre=Ring(pre_max),
-            aps=[Ring(m + DEPTH_MAX) for m in ap], lens=ap,
-            loop=Ring(loop + DEPTH_MAX), loop_len=loop,
-            lp=0.0, hp=0.0, out=0.0,
-            phase=0.0, step=4 * hz / FS,        # triangle, -1..1, period 1/hz
-            early=0.0, late=0.0))
     gains = AP_G[:aps]
     mid = aps // 2
+    sides = []
+    for side, ap, loop, step in (('L', AP_L[:aps], LOOP_L, LFO_STEP[0]),
+                                 ('R', AP_R[:aps], LOOP_R, LFO_STEP[1])):
+        sides.append(dict(name=side, ap=ap, loop=loop, step=step, phase=0,
+                          lp=0.0, hp=0.0, out=0.0, early=0.0, late=0.0))
     out_l, out_r = [0.0] * n, [0.0] * n
     absorb, fb, lp, hp = c['absorb'], c['fb'], c['lp'], c['hp']
-    depth, late, mix, width = c['depth'], c['late'], c['mix'], c['width']
-    pre = (c['pre'] + max(0, -c['off']), c['pre'] + max(0, c['off']))
+    dk, half, late, mix, width = c['dk'], c['half'], c['late'], c['mix'], c['width']
+    gin, gout = 1 / (1 << IN_SHIFT), 1 << OUT_SHIFT
+    head = 0
 
     for i in range(n):
         dry = (left[i], right[i])
-        fed = (side[1]['out'], side[0]['out'])     # the figure-eight crossing
-        for s, S in enumerate(side):
-            # triangle LFO in -1..1
-            ph = S['phase'] + S['step']
-            if ph > 1.0:
-                ph = 2.0 - ph
-                S['step'] = -S['step']
-            elif ph < -1.0:
-                ph = -2.0 - ph
-                S['step'] = -S['step']
+        fed = (sides[1]['out'], sides[0]['out'])     # the figure-eight crossing
+        for s, S in enumerate(sides):
+            ph = (S['phase'] + S['step']) & 0xFFFFFF
             S['phase'] = ph
+            p = min(abs(ph - (1 << 24) if ph & 0x800000 else ph), Q23 - 1)
+            e256 = (p * dk) >> 23
+            sn = S['name']
 
-            r = S['pre']
-            r.buf[r.head] = dry[s]
-            x = r.buf[(r.head - pre[s]) & r.mask]
-            r.head = (r.head + 1) & r.mask
+            w0 = head - seg['pre' + sn]
+            ring[w0 % RING] = dry[s] * gin
+            x = ring[(w0 - c['pre'][s]) % RING]
 
             x += fed[s] * fb
             S['lp'] += lp * (x - S['lp'])
@@ -152,40 +175,31 @@ def render(left, right, knobs, aps=6):
             S['hp'] += hp * (x - S['hp'])
             x = x - S['hp']
 
-            for j, (r, m, g) in enumerate(zip(S['aps'], S['lens'], gains)):
+            for j, (m, g) in enumerate(zip(S['ap'], gains)):
+                w0 = head - seg[f'ap{j + 1}{sn}']
                 if j == 0:
-                    t = m + 0.5 * depth * ph
-                    ti = int(t)
-                    fr = t - ti
-                    a = r.buf[(r.head - ti) & r.mask]
-                    b = r.buf[(r.head - ti - 1) & r.mask]
-                    dl = a + fr * (b - a)
+                    dl = _tap(ring, w0, m * 256 - half + e256)
                 else:
-                    dl = r.buf[(r.head - m) & r.mask]
+                    dl = ring[(w0 - m) % RING]
                 sv = absorb * dl
-                w = x + g * sv
-                r.buf[r.head] = w
-                r.head = (r.head + 1) & r.mask
-                x = sv - g * w
+                w = x - g * sv
+                ring[w0 % RING] = w
+                x = sv + g * w
                 if j == mid - 1:
                     S['early'] = x
             S['late'] = x
 
-            r = S['loop']
-            r.buf[r.head] = x
-            t = S['loop_len'] + 0.5 * depth * (1.0 - ph)   # 0..depth, opposite AP1
-            ti = int(t)
-            fr = t - ti
-            a = r.buf[(r.head - ti) & r.mask]
-            b = r.buf[(r.head - ti - 1) & r.mask]
-            S['out'] = a + fr * (b - a)
-            r.head = (r.head + 1) & r.mask
+            w0 = head - seg['loop' + sn]
+            ring[w0 % RING] = x
+            S['out'] = _tap(ring, w0, S['loop'] * 256 + dk - e256)
+        head += 1
 
-        wl = late * side[0]['late'] + (1.0 - late) * side[0]['early']
-        wr = late * side[1]['late'] + (1.0 - late) * side[1]['early']
+        wl = sides[0]['early'] + late * (sides[0]['late'] - sides[0]['early'])
+        wr = sides[1]['early'] + late * (sides[1]['late'] - sides[1]['early'])
         m, sd = 0.5 * (wl + wr), 0.5 * (wl - wr) * width
-        out_l[i] = dry[0] + mix * (m + sd - dry[0])
-        out_r[i] = dry[1] + mix * (m - sd - dry[1])
+        wet = (max(-1.0, min(1.0, (m + sd) * gout)), max(-1.0, min(1.0, (m - sd) * gout)))
+        out_l[i] = dry[0] + mix * (wet[0] - dry[0])
+        out_r[i] = dry[1] + mix * (wet[1] - dry[1])
     return out_l, out_r
 
 
@@ -228,10 +242,10 @@ def main():
     p.add_argument('inp')
     p.add_argument('out')
     p.add_argument('knobs', nargs='*', help='NAME=0..127')
-    p.add_argument('--aps', type=int, default=6, choices=(4, 6, 8))
+    p.add_argument('--aps', type=int, default=APS, choices=(4, 6))
     p.add_argument('--seconds', type=float, default=None)
     p.add_argument('--tail', type=float, default=0.0, help='seconds of silence appended')
-    p.add_argument('--gain', type=float, default=0.5, help='input gain (headroom)')
+    p.add_argument('--gain', type=float, default=1.0, help='input gain')
     a = p.parse_args()
     knobs = {kv.split('=')[0].upper(): int(kv.split('=')[1]) for kv in a.knobs}
     for name in knobs:
