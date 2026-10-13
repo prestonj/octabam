@@ -108,13 +108,27 @@ and the audio passes dry, bit-exact, until it is clean (128 calls, 46 ms).
 
 ## Measured (12 Oct 2026, `dsp_host`)
 
-- **Cost: 24,584 instructions per core per block** with four instances a
-  core: **121% of the per-track budget** (the stock spring's worst case,
-  20,376, over its four tracks); **126%** with every knob moving and split
-  calls (25,632). Over 100%: on a core running four DEEP VERBs, the other
-  effects on those tracks pay the 21-26%. The sample loop is 369
-  instructions (349 before the smoothing, which made it 113%). These are
-  executed instructions, not hardware cycles.
+- **Cost: 22,536 instructions per core per block** with four instances a
+  core: **111% of the per-track budget** (the stock spring's worst case,
+  20,376, over its four tracks); **116%** with every knob moving and split
+  calls (23,584). Over 100%: on a core running four DEEP VERBs, the other
+  effects on those tracks pay the 11-16%. The sample loop is 337
+  instructions.
+
+  | | loop | unsplit | worst |
+  |---|---:|---:|---:|
+  | first DSP version, no smoothing | 349 | 113% | — |
+  | smoothing (per-sample ramps) | 369 | 121% | 126% |
+  | allpasses with the gain in parallel, output in the other accumulator; the fraction from `a0`; no phase reload | 337 | 111% | 116% |
+
+  The parallel forms are ones stock already runs (`mpy x0,x0,a #>$7fffff,y1`,
+  `move a0,b`, `lsr b`, `move b1,y0`); stock has no `y:(Rn+Nn)` in a
+  parallel move, so every ring access stays a plain move. These are
+  executed instructions, not hardware cycles: like Mini Verb, every ring
+  access uses `n5` straight after loading it, which the 56300 interlocks
+  with a stall the meter does not count (stock does it once in 13,068
+  instructions). The cycle cost on the chip is higher than these numbers;
+  by how much is unmeasured.
 - **Against the reference:** the residual is 73–88 dB under the
   reference's level at five settings (defaults, chorus at both decay
   extremes, every knob off-centre, partial MIX): 24-bit rounding.
@@ -132,9 +146,10 @@ and the audio passes dry, bit-exact, until it is clean (128 calls, 46 ms).
 - **PRE and OFFST slip a sample a call while they move.** An interpolated
   pre-delay read with a per-sample ramp would make them clean, for about
   28 instructions a sample (~9% of the budget).
-- **Over budget** (121-126%). Cheaper options are not taken yet: dropping
-  the absorb/feedback ramps (8 a sample; DECAY jumps click again), or
-  parallel moves in the allpasses, in forms stock already runs.
+- **Over budget** (111-116%). Left: dropping the absorb/feedback ramps (8
+  a sample; DECAY jumps click again).
+- **The `n5` stalls** (above): real cycles the instruction meter does not
+  see. A burn measurement on the unit would price them.
 - **The voicing is a first guess** (gains, LFO rates, filter ranges, the
   DECAY curve); listening will move it.
 - **The near-freeze in fixed point:** a full-scale input at DECAY 127 is

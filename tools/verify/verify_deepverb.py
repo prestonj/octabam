@@ -53,11 +53,10 @@ CLEAR = 128                 # calls before the ring is clean: dry until then
 WARM = CLEAR + 32           # blocks of silence before the test audio
 SPRING_PEAK = 20376         # stock spring, worst tested, per core per block
 # The per-track budget: spring's peak over its four tracks. The ceiling is a
-# regression guard, not a target: DEEP VERB measured 121% of the budget
-# unsplit and 126% with moving knobs and split calls (12 Oct 2026; 113%
-# before the smoothing).
+# regression guard, not a target: DEEP VERB measured 111% of the budget
+# unsplit and 116% with moving knobs and split calls (12 Oct 2026).
 BUDGET = SPRING_PEAK / 4
-CEILING = 1.28 * SPRING_PEAK
+CEILING = 1.18 * SPRING_PEAK
 
 # Knob jump -> (bound, unsmoothed): the 4th-difference peak in LSB, the tone
 # 0.25 of full scale (2.1M LSB). Measured 12 Oct 2026, one instance, MIX 100.

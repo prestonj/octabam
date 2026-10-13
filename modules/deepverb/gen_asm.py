@@ -87,13 +87,12 @@ def generate():
 
     def interp(note):
         """a = P (positive, 8 fraction bits) -> a = the interpolated read."""
-        ins('move', 'a,b', note)
-        ins('asr', '#$8,a,a')
-        ins('move', 'a1,n5', 'the integer part: ring offset of the older word')
+        ins('asr', '#$8,a,a', note + ': a1 the integer, a0 the fraction << 16')
+        ins('move', 'a1,n5', 'the ring offset of the older word')
+        ins('move', 'a0,b')
+        ins('lsr', 'b', 'b1 = f << 15, non-negative; b2 is stale')
         ins('lua', '(r5+n5),r4')
-        ins('and', '#>$ff,b', 'b is non-negative: b2 stays zero')
-        ins('asl', '#$f,b,b')
-        ins('move', 'b,y0', 'f, the fraction toward the newer word')
+        ins('move', 'b1,y0', 'f, the fraction toward the newer word')
         ins('move', 'y:(r4)+,b')
         ins('move', 'y:(r4),a')
         ins('sub', 'b,a')
@@ -101,23 +100,25 @@ def generate():
         ins('mpy', 'y0,x0,a')
         ins('add', 'b,a')
 
-    def allpass(j, side, start, m):
-        """Lossy allpass j (1-based) with a = x; y0 = absorb on entry."""
-        gw = h(g[j - 1])
+    def allpass(j, side, start, m, i, o):
+        """Lossy allpass j (1-based): x in accumulator i, d in x0 for the
+        first (moving) one, y0 = absorb. The output lands in o, the other
+        accumulator, so the next allpass takes it from there: no move b,a.
+        The gain loads in parallel with the multiply (stock: mpy x0,x0,a
+        #>$7fffff,y1); the Y reads and writes stay plain moves, as stock has
+        no y:(Rn+Nn) in a parallel move."""
         if j > 1:
             ins('move', f'#>{h(-(start + m))},n5', f'AP{j}{side} {m}, g={ref.AP_G[j - 1]}')
             ins('move', 'y:(r5+n5),x0')
-        ins('mpy', 'y0,x0,b', 's = absorb * d')
-        ins('move', 'b,x0')
-        ins('move', f'#>{gw},y1')
-        ins('mac', '-x0,y1,a', 'w = x - g*s')
+        ins('mpy', f'y0,x0,{o}       #>{h(g[j - 1])},y1', 's = absorb * d; g')
+        ins('move', f'{o},x0')
+        ins('mac', f'-x0,y1,{i}', 'w = x - g*s')
         ins('move', f'#>{h(-start)},n5')
         if RND:
-            ins('rnd', 'a')
-        ins('move', 'a,y:(r5+n5)')
-        ins('move', 'a,x0')
-        ins('move', 'b,a')
-        ins('mac', 'x0,y1,a', 'y = s + g*w')
+            ins('rnd', i)
+        ins('move', f'{i},y:(r5+n5)')
+        ins('move', f'{i},x0')
+        ins('mac', f'x0,y1,{o}', 'y = s + g*w')
 
     def side(s):
         o = 'R' if s == 'L' else 'L'
@@ -164,33 +165,26 @@ def generate():
         if HP48:
             ins('move', f'a0,{x("hp" + s + "lo")}')
             ins('rnd', 'a')
-        ins('move', 'a,x0')
-        ins('move', 'x1,a')
-        ins('sub', 'x0,a')
+        ins('move', 'x1,b')
+        ins('sub', 'a,b')
         start = seg['ap1' + s]
-        ins('move', 'a,x1', f'park x; AP1{s} {ap[0]} +- depth/2, g={ref.AP_G[0]}')
+        ins('move', 'b,x1', f'park x - LP(x); AP1{s} {ap[0]} +- depth/2, g={ref.AP_G[0]}')
         ins('move', f'{x("b1" + s)},a')
         ins('move', f'{x("e" + s)},x0')
         ins('sub', 'x0,a', 'P = B1 - e')
         interp('the moving read')
         ins('move', 'a,x0')
         ins('move', f'{x("cabsorb")},y0', 'absorb, held in y0 through the chain')
-        ins('mpy', 'y0,x0,b', 's = absorb * d')
-        ins('move', 'b,x0')
-        ins('move', 'x1,a')
-        ins('move', f'#>{h(g[0])},y1')
-        ins('mac', '-x0,y1,a', 'w = x - g*s')
-        ins('move', f'#>{h(-start)},n5')
-        if RND:
-            ins('rnd', 'a')
-        ins('move', 'a,y:(r5+n5)')
-        ins('move', 'a,x0')
-        ins('move', 'b,a')
-        ins('mac', 'x0,y1,a', 'y = s + g*w')
-        for j in range(2, ref.APS + 1):
-            allpass(j, s, seg[f'ap{j}{s}'], ap[j - 1])
+        ins('move', 'x1,a', 'x back')
+        acc = ('a', 'b')
+        for j in range(1, ref.APS + 1):
+            i, o = acc[(j - 1) % 2], acc[j % 2]
+            allpass(j, s, seg[f'ap{j}{s}'], ap[j - 1], i, o)
             if j == ref.APS // 2:
-                ins('move', f'a,{x("early" + s)}', 'EARLY tap')
+                ins('move', f'{o},{x("early" + s)}', 'EARLY tap')
+        last = acc[ref.APS % 2]
+        if last != 'a':
+            ins('move', f'{last},a')
         ins('move', f'a,{x("late" + s)}', 'LATE tap')
         ins('move', f'#>{h(-seg["loop" + s])},n5', f'loop delay {loop} + depth - e')
         if RND:
@@ -208,9 +202,8 @@ def generate():
         ins('move', f'#>{step},x0')
         ins('add', 'x0,a')
         ins('move', f'a1,{x("ph" + s)}', 'wraps: a1 is stored raw')
-        ins('move', f'{x("ph" + s)},a')
-        ins('abs', 'a')
-        ins('move', 'a,x0', '|-1| saturates to the largest word')
+        ins('abs', 'a', 'unwrapped: past +1 it is still about 1')
+        ins('move', 'a,x0', 'and saturates to the largest word')
         ins('move', f'{x("dk")},y1')
         ins('mpy', 'x0,y1,a', 'a1 = p * depth * 256, an integer')
         ins('move', f'a1,{x("e" + s)}')

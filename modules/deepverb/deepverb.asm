@@ -312,9 +312,8 @@ dv_derive:
         move    #>270,x0
         add     x0,a
         move    a1,x:(r7+$14)           ; wraps: a1 is stored raw
-        move    x:(r7+$14),a
-        abs     a
-        move    a,x0                    ; |-1| saturates to the largest word
+        abs     a                       ; unwrapped: past +1 it is still about 1
+        move    a,x0                    ; and saturates to the largest word
         move    x:(r7+$08),y1
         mpy     x0,y1,a                 ; a1 = p * depth * 256, an integer
         move    a1,x:(r7+$16)
@@ -322,9 +321,8 @@ dv_derive:
         move    #>354,x0
         add     x0,a
         move    a1,x:(r7+$15)           ; wraps: a1 is stored raw
-        move    x:(r7+$15),a
-        abs     a
-        move    a,x0                    ; |-1| saturates to the largest word
+        abs     a                       ; unwrapped: past +1 it is still about 1
+        move    a,x0                    ; and saturates to the largest word
         move    x:(r7+$08),y1
         mpy     x0,y1,a                 ; a1 = p * depth * 256, an integer
         move    a1,x:(r7+$17)
@@ -361,20 +359,18 @@ dv_derive:
         move    a,x:(r7+$19)
         move    a0,x:(r7+$25)
         rnd     a
-        move    a,x0
-        move    x1,a
-        sub     x0,a
-        move    a,x1                    ; park x; AP1L 293 +- depth/2, g=0.65
+        move    x1,b
+        sub     a,b
+        move    b,x1                    ; park x - LP(x); AP1L 293 +- depth/2, g=0.65
         move    x:(r7+$09),a
         move    x:(r7+$16),x0
         sub     x0,a                    ; P = B1 - e
-        move    a,b                     ; the moving read
-        asr     #$8,a,a
-        move    a1,n5                   ; the integer part: ring offset of the older word
+        asr     #$8,a,a                 ; the moving read: a1 the integer, a0 the fraction << 16
+        move    a1,n5                   ; the ring offset of the older word
+        move    a0,b
+        lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
-        and     #>$ff,b                 ; b is non-negative: b2 stays zero
-        asl     #$f,b,b
-        move    b,y0                    ; f, the fraction toward the newer word
+        move    b1,y0                   ; f, the fraction toward the newer word
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
@@ -383,71 +379,59 @@ dv_derive:
         add     b,a
         move    a,x0
         move    x:(r7+$40),y0           ; absorb, held in y0 through the chain
-        mpy     y0,x0,b                 ; s = absorb * d
+        move    x1,a                    ; x back
+        mpy     y0,x0,b       #>$533333,y1; s = absorb * d; g
         move    b,x0
-        move    x1,a
-        move    #>$533333,y1
         mac     -x0,y1,a                ; w = x - g*s
         move    #>$ffea34,n5
         move    a,y:(r5+n5)
         move    a,x0
-        move    b,a
-        mac     x0,y1,a                 ; y = s + g*w
+        mac     x0,y1,b                 ; y = s + g*w
         move    #>$ffe5b0,n5            ; AP2L 797, g=0.62
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
-        move    b,x0
-        move    #>$4f5c29,y1
-        mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe8cd,n5
-        move    a,y:(r5+n5)
+        mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
-        move    b,a
+        mac     -x0,y1,b                ; w = x - g*s
+        move    #>$ffe8cd,n5
+        move    b,y:(r5+n5)
+        move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    #>$ffe35e,n5            ; AP3L 593, g=0.62
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
+        mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
-        move    #>$4f5c29,y1
         mac     -x0,y1,a                ; w = x - g*s
         move    #>$ffe5af,n5
         move    a,y:(r5+n5)
         move    a,x0
-        move    b,a
-        mac     x0,y1,a                 ; y = s + g*w
-        move    a,x:(r7+$20)            ; EARLY tap
+        mac     x0,y1,b                 ; y = s + g*w
+        move    b,x:(r7+$20)            ; EARLY tap
         move    #>$ffe20c,n5            ; AP4L 337, g=0.6
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
-        move    b,x0
-        move    #>$4ccccd,y1
-        mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe35d,n5
-        move    a,y:(r5+n5)
+        mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
-        move    b,a
+        mac     -x0,y1,b                ; w = x - g*s
+        move    #>$ffe35d,n5
+        move    b,y:(r5+n5)
+        move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    #>$ffe018,n5            ; AP5L 499, g=0.6
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
+        mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
-        move    #>$4ccccd,y1
         mac     -x0,y1,a                ; w = x - g*s
         move    #>$ffe20b,n5
         move    a,y:(r5+n5)
         move    a,x0
-        move    b,a
-        mac     x0,y1,a                 ; y = s + g*w
+        mac     x0,y1,b                 ; y = s + g*w
         move    #>$ffdd48,n5            ; AP6L 719, g=0.6
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
-        move    b,x0
-        move    #>$4ccccd,y1
-        mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffe017,n5
-        move    a,y:(r5+n5)
+        mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
-        move    b,a
+        mac     -x0,y1,b                ; w = x - g*s
+        move    #>$ffe017,n5
+        move    b,y:(r5+n5)
+        move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$22)            ; LATE tap
         move    #>$ffdd47,n5            ; loop delay 1867 + depth - e
@@ -455,13 +439,12 @@ dv_derive:
         move    x:(r7+$0b),a
         move    x:(r7+$16),x0
         add     x0,a                    ; P = B9 + e
-        move    a,b                     ; the moving read
-        asr     #$8,a,a
-        move    a1,n5                   ; the integer part: ring offset of the older word
+        asr     #$8,a,a                 ; the moving read: a1 the integer, a0 the fraction << 16
+        move    a1,n5                   ; the ring offset of the older word
+        move    a0,b
+        lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
-        and     #>$ff,b                 ; b is non-negative: b2 stays zero
-        asl     #$f,b,b
-        move    b,y0                    ; f, the fraction toward the newer word
+        move    b1,y0                   ; f, the fraction toward the newer word
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
@@ -502,20 +485,18 @@ dv_derive:
         move    a,x:(r7+$1b)
         move    a0,x:(r7+$27)
         rnd     a
-        move    a,x0
-        move    x1,a
-        sub     x0,a
-        move    a,x1                    ; park x; AP1R 359 +- depth/2, g=0.65
+        move    x1,b
+        sub     a,b
+        move    b,x1                    ; park x - LP(x); AP1R 359 +- depth/2, g=0.65
         move    x:(r7+$0a),a
         move    x:(r7+$17),x0
         sub     x0,a                    ; P = B1 - e
-        move    a,b                     ; the moving read
-        asr     #$8,a,a
-        move    a1,n5                   ; the integer part: ring offset of the older word
+        asr     #$8,a,a                 ; the moving read: a1 the integer, a0 the fraction << 16
+        move    a1,n5                   ; the ring offset of the older word
+        move    a0,b
+        lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
-        and     #>$ff,b                 ; b is non-negative: b2 stays zero
-        asl     #$f,b,b
-        move    b,y0                    ; f, the fraction toward the newer word
+        move    b1,y0                   ; f, the fraction toward the newer word
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a
@@ -524,71 +505,59 @@ dv_derive:
         add     b,a
         move    a,x0
         move    x:(r7+$40),y0           ; absorb, held in y0 through the chain
-        mpy     y0,x0,b                 ; s = absorb * d
+        move    x1,a                    ; x back
+        mpy     y0,x0,b       #>$533333,y1; s = absorb * d; g
         move    b,x0
-        move    x1,a
-        move    #>$533333,y1
         mac     -x0,y1,a                ; w = x - g*s
         move    #>$ffd57a,n5
         move    a,y:(r5+n5)
         move    a,x0
-        move    b,a
-        mac     x0,y1,a                 ; y = s + g*w
+        mac     x0,y1,b                 ; y = s + g*w
         move    #>$ffd0cc,n5            ; AP2R 773, g=0.62
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
-        move    b,x0
-        move    #>$4f5c29,y1
-        mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffd3d1,n5
-        move    a,y:(r5+n5)
+        mpy     y0,x0,a       #>$4f5c29,y1; s = absorb * d; g
         move    a,x0
-        move    b,a
+        mac     -x0,y1,b                ; w = x - g*s
+        move    #>$ffd3d1,n5
+        move    b,y:(r5+n5)
+        move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    #>$ffce4a,n5            ; AP3R 641, g=0.62
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
+        mpy     y0,x0,b       #>$4f5c29,y1; s = absorb * d; g
         move    b,x0
-        move    #>$4f5c29,y1
         mac     -x0,y1,a                ; w = x - g*s
         move    #>$ffd0cb,n5
         move    a,y:(r5+n5)
         move    a,x0
-        move    b,a
-        mac     x0,y1,a                 ; y = s + g*w
-        move    a,x:(r7+$21)            ; EARLY tap
+        mac     x0,y1,b                 ; y = s + g*w
+        move    b,x:(r7+$21)            ; EARLY tap
         move    #>$ffcce8,n5            ; AP4R 353, g=0.6
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
-        move    b,x0
-        move    #>$4ccccd,y1
-        mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffce49,n5
-        move    a,y:(r5+n5)
+        mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
-        move    b,a
+        mac     -x0,y1,b                ; w = x - g*s
+        move    #>$ffce49,n5
+        move    b,y:(r5+n5)
+        move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    #>$ffcb14,n5            ; AP5R 467, g=0.6
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
+        mpy     y0,x0,b       #>$4ccccd,y1; s = absorb * d; g
         move    b,x0
-        move    #>$4ccccd,y1
         mac     -x0,y1,a                ; w = x - g*s
         move    #>$ffcce7,n5
         move    a,y:(r5+n5)
         move    a,x0
-        move    b,a
-        mac     x0,y1,a                 ; y = s + g*w
+        mac     x0,y1,b                 ; y = s + g*w
         move    #>$ffc856,n5            ; AP6R 701, g=0.6
         move    y:(r5+n5),x0
-        mpy     y0,x0,b                 ; s = absorb * d
-        move    b,x0
-        move    #>$4ccccd,y1
-        mac     -x0,y1,a                ; w = x - g*s
-        move    #>$ffcb13,n5
-        move    a,y:(r5+n5)
+        mpy     y0,x0,a       #>$4ccccd,y1; s = absorb * d; g
         move    a,x0
-        move    b,a
+        mac     -x0,y1,b                ; w = x - g*s
+        move    #>$ffcb13,n5
+        move    b,y:(r5+n5)
+        move    b,x0
         mac     x0,y1,a                 ; y = s + g*w
         move    a,x:(r7+$23)            ; LATE tap
         move    #>$ffc855,n5            ; loop delay 1733 + depth - e
@@ -596,13 +565,12 @@ dv_derive:
         move    x:(r7+$0c),a
         move    x:(r7+$17),x0
         add     x0,a                    ; P = B9 + e
-        move    a,b                     ; the moving read
-        asr     #$8,a,a
-        move    a1,n5                   ; the integer part: ring offset of the older word
+        asr     #$8,a,a                 ; the moving read: a1 the integer, a0 the fraction << 16
+        move    a1,n5                   ; the ring offset of the older word
+        move    a0,b
+        lsr     b                       ; b1 = f << 15, non-negative; b2 is stale
         lua     (r5+n5),r4
-        and     #>$ff,b                 ; b is non-negative: b2 stays zero
-        asl     #$f,b,b
-        move    b,y0                    ; f, the fraction toward the newer word
+        move    b1,y0                   ; f, the fraction toward the newer word
         move    y:(r4)+,b
         move    y:(r4),a
         sub     b,a

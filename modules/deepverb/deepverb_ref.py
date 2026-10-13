@@ -159,9 +159,10 @@ def render(left, right, knobs, aps=APS):
         dry = (left[i], right[i])
         fed = (sides[1]['out'], sides[0]['out'])     # the figure-eight crossing
         for s, S in enumerate(sides):
-            ph = (S['phase'] + S['step']) & 0xFFFFFF
-            S['phase'] = ph
-            p = min(abs(ph - (1 << 24) if ph & 0x800000 else ph), Q23 - 1)
+            old = S['phase'] - (1 << 24) if S['phase'] & 0x800000 else S['phase']
+            u = old + S['step']                   # unwrapped, as the accumulator holds it
+            S['phase'] = u & 0xFFFFFF
+            p = min(abs(u), Q23 - 1)              # past +1 it saturates: p is still about 1
             e256 = (p * dk) >> 23
             sn = S['name']
 
