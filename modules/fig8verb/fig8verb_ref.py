@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Float reference for DEEPVERB: a true-stereo figure-eight allpass loop.
+"""Float reference for FIG8VERB: a true-stereo figure-eight allpass loop.
 
 The topology is the published one (Dattorro, "Effect Design Part 1", JAES
 45(9), 1997, figure 1's tank; Griesinger's cross-coupled loop). The delay
@@ -20,10 +20,10 @@ A lossy allpass scales its delayed sample by ABSORB before the lattice:
 Every operation is one the DSP sample loop can do in the form it will be
 written: no per-sample division or transcendental; the coefficients are
 computed per 16-sample block, the LFOs are per-sample triangles. This file is
-the specification deepverb.asm is gated against: the arithmetic below is
+the specification fig8verb.asm is gated against: the arithmetic below is
 the DSP's (integer tap positions, LFO phase, gain staging), in float.
 
-    python3 modules/deepverb/deepverb_ref.py IN.wav OUT.wav [knob=value ...]
+    python3 modules/fig8verb/fig8verb_ref.py IN.wav OUT.wav [knob=value ...]
 """
 import argparse
 import array
@@ -76,7 +76,7 @@ def q23(v):
 
 
 def knob_q(k):
-    """k/127 as deepverb.asm computes it: w + w*(1/127), w = k << 16,
+    """k/127 as fig8verb.asm computes it: w + w*(1/127), w = k << 16,
     saturated at the largest Q23 value."""
     w = k << 16
     return min(w + ((w * 0x010204) >> 23), Q23 - 1)

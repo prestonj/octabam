@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""DEEP VERB gates on the assembled DSP code, under dsp_host.
+"""FIG8 VERB gates on the assembled DSP code, under dsp_host.
 
-    python3 tools/verify/verify_deepverb.py [remix]
+    python3 tools/verify/verify_fig8verb.py [remix]
 
 With a remix (make check has just built it) the image at out/mainos_bus.bin
-is the one tested; with none, the `deepverb` test remix is built here and
+is the one tested; with none, the `fig8verb` test remix is built here and
 the image that was there before is put back.
 
-1. deepverb.asm is gen_asm.py's output (the source cannot drift from the
+1. fig8verb.asm is gen_asm.py's output (the source cannot drift from the
    reference's layout and laws).
-2. The DSP matches deepverb_ref.py, stereo, at five settings: the residual
+2. The DSP matches fig8verb_ref.py, stereo, at five settings: the residual
    stays 40 dB under the reference's level (measured 45-80 dB, 12 Oct 2026:
    24-bit rounding, not a different algorithm).
 3. Dry, bit-exact, while the ring is cleared (the first 128 calls).
@@ -43,16 +43,16 @@ import toolpath  # noqa: E402,F401
 import send_probe  # noqa: E402
 from remix import registry  # noqa: E402
 
-sys.path.insert(0, str(ROOT / 'modules/deepverb'))
-import deepverb_ref as ref  # noqa: E402
+sys.path.insert(0, str(ROOT / 'modules/fig8verb'))
+import fig8verb_ref as ref  # noqa: E402
 
 HOST = os.environ.get('DSP_HOST') or str(ROOT / 'vendor/dsp56300/build/source/dsp_host/dsp_host')
-OUT = ROOT / 'out/deepverb_verify'
+OUT = ROOT / 'out/fig8verb_verify'
 FR = 16
 CLEAR = 128                 # calls before the ring is clean: dry until then
 WARM = CLEAR + 32           # blocks of silence before the test audio
 SPRING_PEAK = 20376         # stock spring, worst tested, per core per block
-# The per-track budget: spring's peak over its four tracks. DEEP VERB measured
+# The per-track budget: spring's peak over its four tracks. FIG8 VERB measured
 # 99.3% of it here (split calls, knobs still), 99.7% with one knob moving
 # every block and 102.2% with all nine moving (12 Oct 2026). The ceiling is a
 # regression guard just above the measurement.
@@ -72,7 +72,7 @@ KNOB_JUMP = {
 }
 SPLITS = [1, 3, 7, 15, 15, 7, 3, 1]
 
-MOD = registry.by_key('DEEPVERB')
+MOD = registry.by_key('FIG8VERB')
 NAMES = [p.name.decode() if p.name else '' for p in MOD.params]
 # reference knob names -> panel slot names
 PANEL = {'CHORUS': 'CHOR', 'LOWCUT': 'LCUT'}
@@ -153,9 +153,9 @@ def plucks(seconds=3.0):
 
 def verify(mems):
     OUT.mkdir(parents=True, exist_ok=True)
-    gen = subprocess.run([sys.executable, str(ROOT / 'modules/deepverb/gen_asm.py'), '--check'],
+    gen = subprocess.run([sys.executable, str(ROOT / 'modules/fig8verb/gen_asm.py'), '--check'],
                          capture_output=True, text=True)
-    gate('deepverb.asm is gen_asm.py output', gen.returncode == 0, gen.stdout.strip())
+    gate('fig8verb.asm is gen_asm.py output', gen.returncode == 0, gen.stdout.strip())
 
     left, right = plucks()
     lead = (WARM - CLEAR) * FR          # the LFOs run through the warm-up after the clear
@@ -171,7 +171,7 @@ def verify(mems):
         err = np.sqrt(np.mean((dl - rl) ** 2 + (dr - rr) ** 2))
         lvl = np.sqrt(np.mean(rl ** 2 + rr ** 2))
         db = 20 * np.log10(err / lvl)
-        gate(f'matches deepverb_ref {k or "defaults"}', db < -40,
+        gate(f'matches fig8verb_ref {k or "defaults"}', db < -40,
              f'residual {db:.1f} dB re the reference ({20 * np.log10(lvl):.1f} dBFS)')
 
     (dsp,), _ = run(mems, 'clear', [(left, right)], [{}], lead=0)
@@ -245,7 +245,7 @@ def verify(mems):
              f'4th-difference peak {peak:.0f} LSB <= {bound} (unsmoothed {unsmoothed})')
 
     (OUT / 'verification.json').write_text(json.dumps(gates, indent=2) + '\n')
-    print(f'{len(gates)} DEEP VERB gates passed', flush=True)
+    print(f'{len(gates)} FIG8 VERB gates passed', flush=True)
 
 
 def build_standalone():
@@ -256,15 +256,15 @@ def build_standalone():
         shutil.copy(image, keep)
     try:
         r = subprocess.run([sys.executable, 'tools/build/build_bus.py'], cwd=ROOT,
-                           env={**os.environ, 'REMIX': 'deepverb', 'XBUS': '1', 'SPEC': '1'},
+                           env={**os.environ, 'REMIX': 'fig8verb', 'XBUS': '1', 'SPEC': '1'},
                            capture_output=True, text=True)
         (OUT / 'build.log').write_text(r.stdout + r.stderr)
         if r.returncode:
-            raise SystemExit(f'deepverb build failed: {OUT / "build.log"}')
+            raise SystemExit(f'fig8verb build failed: {OUT / "build.log"}')
         with tempfile.TemporaryDirectory() as tmp:
-            built = Path(tmp) / 'deepverb.bin'
+            built = Path(tmp) / 'fig8verb.bin'
             shutil.copy(image, built)
-            return [send_probe.dump_mem(built, OUT / f'deepverb_{p}.mem', p) for p in 'AB']
+            return [send_probe.dump_mem(built, OUT / f'fig8verb_{p}.mem', p) for p in 'AB']
     finally:
         if keep.exists():
             shutil.copy(keep, image)
@@ -274,14 +274,14 @@ def build_standalone():
 
 
 if __name__ == '__main__':
-    name = sys.argv[1] if len(sys.argv) > 1 else 'deepverb'
-    if 'DEEPVERB' not in registry.remix(name).modules:
-        print(f'[N/A] verify_deepverb: {name} does not carry DEEPVERB')
+    name = sys.argv[1] if len(sys.argv) > 1 else 'fig8verb'
+    if 'FIG8VERB' not in registry.remix(name).modules:
+        print(f'[N/A] verify_fig8verb: {name} does not carry FIG8VERB')
         sys.exit(0)
     if len(sys.argv) > 1:
         image = ROOT / 'out/mainos_bus.bin'
         OUT.mkdir(parents=True, exist_ok=True)
-        print(f'Verifying DEEP VERB in the selected image: {name}', flush=True)
+        print(f'Verifying FIG8 VERB in the selected image: {name}', flush=True)
         mems = [send_probe.dump_mem(image, OUT / f'selected_{p}.mem', p) for p in 'AB']
     else:
         mems = build_standalone()

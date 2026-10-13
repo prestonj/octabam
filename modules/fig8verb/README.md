@@ -1,4 +1,4 @@
-# `deepverb` — DEEP VERB
+# `fig8verb` — FIG8 VERB
 
 A true-stereo reverb for FX2: two cross-coupled chains of lossy allpasses,
 each side's loop delay feeding the other. A panned source keeps its side
@@ -63,9 +63,9 @@ sampled once a full call, 16 samples ahead, and walked to in a straight
 line a sample at a time (`e += de`). The right side's triangles run 1.31×
 the left's.
 
-`deepverb_ref.py` is the specification: the DSP's arithmetic in float
+`fig8verb_ref.py` is the specification: the DSP's arithmetic in float
 (integer tap positions with eight fraction bits, the same LFO phase, the
-same gain staging). `gen_asm.py` writes `deepverb.asm` from it, so the
+same gain staging). `gen_asm.py` writes `fig8verb.asm` from it, so the
 ring layout and constants cannot drift from the reference; edit the
 generator, never the `.asm`.
 
@@ -131,6 +131,9 @@ passes dry, bit-exact, until it is clean (128 calls, 46 ms).
 
 ## On the unit
 
+Named DEEP VERB (`DEEP`) until 13 Oct 2026, and on both flashes below; the
+same effect and the same FX2 id, 0x1b, so saved projects keep it.
+
 OCTABAM9 (remix `verbs`, beside Mini Verb), the author's unit, 12 Oct 2026:
 the voice before this one (BAL and OFFST, CHOR to 128 samples, PRE to
 48 ms). Heard: preferred to Mini Verb, the high-pass the reason; more
@@ -143,7 +146,7 @@ RATE took OFFST's slot.
 
 OCTABAM11 (remix `verbs`), the author's unit, 13 Oct 2026: the current
 voice (the wander, four a core at 99.3% of the budget by instruction
-count). Four DEEP VERBs on FX2 and four FILTERs on FX1 of tracks 1-4,
+count). Four FIG8 VERBs on FX2 and four FILTERs on FX1 of tracks 1-4,
 all eight effects on one core: the unit did not hang and it sounded
 good. Not measured: a burn reading of the spare cycles, or a capture
 checked for overload artifacts.
@@ -152,7 +155,7 @@ checked for overload artifacts.
 
 - **Cost: 20,228 instructions per core per block** with four instances a
   core and split calls: **99.3% of the per-track budget** (the stock
-  spring's worst case, 20,376, over its four tracks). Four DEEP VERBs fit a
+  spring's worst case, 20,376, over its four tracks). Four FIG8 VERBs fit a
   core within stock spring's cost.
 
   | case | per core per block | budget |
@@ -215,8 +218,8 @@ checked for overload artifacts.
 ## Gates
 
 ```sh
-make verify-deepverb          # 29 gates: tools/verify/verify_deepverb.py
-make check REMIX=deepverb
-python3 modules/deepverb/gen_asm.py --check
-python3 modules/deepverb/deepverb_ref.py IN.wav OUT.wav DECAY=110 CHORUS=100 RATE=60
+make verify-fig8verb          # 29 gates: tools/verify/verify_fig8verb.py
+make check REMIX=fig8verb
+python3 modules/fig8verb/gen_asm.py --check
+python3 modules/fig8verb/fig8verb_ref.py IN.wav OUT.wav DECAY=110 CHORUS=100 RATE=60
 ```

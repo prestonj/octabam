@@ -102,7 +102,7 @@ The two tables above.
 | `verify_burn` | SEND | per remix | the RIG BURN probe image is the shipping one plus an inert, exact knob | `dsp_host` |
 | `verify_character`, `verify_spectrum`, `verify_modulation` | the three stations | shared | each station against arithmetic you can predict or a float reference: bypass bit-exact, every mode, bounded resonance, the FX1-only promise | `dsp_host` |
 | `verify_miniverb` | MINIVERB | image | eight instances isolated, dirty memory, buffer guards, audio gates | `dsp_host` |
-| `verify_deepverb` | DEEPVERB | image | the DSP against its float reference (five settings), dry while the ring clears, LFO-dirty knob words, eight instances isolated, a tail that decays | `dsp_host` |
+| `verify_fig8verb` | FIG8VERB | image | the DSP against its float reference (five settings), dry while the ring clears, LFO-dirty knob words, eight instances isolated, a tail that decays | `dsp_host` |
 | `verify_euclid` | EUCLID | image | control math, the ColdFire hooks, DSP renders, playback under the port | `.venv`, port, project |
 | `verify_tapeecho_cpu` | TAPE ECHO | image | the C reference against the compiled ColdFire port, through the stock delay routine and its DMA protocol | `.venv`, `cc`, port |
 | `verify_modedefaults` | MODE DEFAULTS | per remix | a MODE turn through the panel's editor, and a MODE over CC MAP, lands that mode's view in the live lane (one boot, `--step`) | port, project |
@@ -142,7 +142,7 @@ is an offline specification test nothing runs.
 | `make verify-delay CAND=...`, `make verify-roll CAND=...` | an alternate delay or reverb engine is bit-identical to the shipping one |
 | `make verify-ident MOD=<station>`, `make verify-spectrum-ident` (`SAVE=1` first) | a rewritten station is bit-identical across a knob matrix |
 | `make verify-midi` | the note to PITCH path, through a build override |
-| `make verify-twocore`, `make verify-onebus`, `make verify-knobs`, `make verify-miniverb`, `make verify-deepverb` | the gates of the tables above, alone |
+| `make verify-twocore`, `make verify-onebus`, `make verify-knobs`, `make verify-miniverb`, `make verify-fig8verb` | the gates of the tables above, alone |
 
 ### The port's own tests
 
@@ -232,7 +232,7 @@ dear={"DRV": 127, "FOLD": 127, "COMP": 127, "MIX": 127, "WDTH": 127, "SAT": 0},
 **The test remixes are left out** (30 Sep 2026): no remix under
 `remixes/test/` is picked by `make reach` in either tier, as a carrier, the
 floor, the cover or identity. A change to a module that only test remixes
-carry (CF METER, DEEP VERB, EUCLID, MINIVERB, TAPE ECHO, most USB AUDIO IN/OUT
+carry (CF METER, FIG8 VERB, EUCLID, MINIVERB, TAPE ECHO, most USB AUDIO IN/OUT
 variants) reaches the selftest and no remix check, and the listing says
 so; `TESTS=1` brings the test remixes back.
 
@@ -417,7 +417,7 @@ settings and called covered; a module PR that wants the pressure stages
 adds `dear` beside its gates.
 
 Declared on 27 Sep 2026: SEND, DELAY SERVER, REVERB SERVER, CHARACTER,
-SPECTRUM, MODULATION; DEEPVERB on 12 Oct 2026. Blocked until their authors declare one: MINIVERB,
+SPECTRUM, MODULATION; FIG8VERB on 12 Oct 2026. Blocked until their authors declare one: MINIVERB,
 TAPE ECHO, EUCLID, CF METER.
 
 A generated project's automated playback checks A01 through the existing

@@ -205,9 +205,9 @@ benchmark-reverbs: ## Stock spring/plate/dark vs Mini Verb: eight instances, all
 verify-miniverb: ## Mini Verb: both cores, isolation, dirty memory, buffer guards and audio gates
 	python3 tools/verify/verify_miniverb.py
 
-.PHONY: verify-deepverb
-verify-deepverb: ## DEEP VERB: the float reference, dry while clearing, dirty knob words, eight instances, a decaying tail
-	python3 tools/verify/verify_deepverb.py
+.PHONY: verify-fig8verb
+verify-fig8verb: ## FIG8 VERB: the float reference, dry while clearing, dirty knob words, eight instances, a decaying tail
+	python3 tools/verify/verify_fig8verb.py
 
 .PHONY: compare-vintageverb
 compare-vintageverb: ## macOS: render installed VintageVerb default vs Mini Verb (run verify-miniverb first)
